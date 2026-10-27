@@ -112,6 +112,7 @@ export default function Settings({ go }) {
           <button className="btn" onClick={() => exportCSV('debts')}>Борги (CSV)</button>
         </div>
       </div>
+      <Password />
       <button className="btn block danger" style={{ marginBottom: 24 }} onClick={() => sb.auth.signOut()}>Вийти</button>
     </>
   );
@@ -186,6 +187,20 @@ function Dates() {
         <label className="row small"><input type="checkbox" checked={f.yearly} onChange={(e) => setF({ ...f, yearly: e.target.checked })} />щороку</label>
         <button className="btn" onClick={async () => { if (f.title && f.date) { await s.insert('important_dates', f, ['dates']); setF({ title: '', date: '', yearly: true }); } }}><Icon n="plus" size={16} /></button>
       </div>
+    </div>
+  );
+}
+
+function Password() {
+  const s = useStore();
+  const [pw, setPw] = useState('');
+  return (
+    <div className="card"><h3>Пароль</h3>
+      <div className="row"><input className="input" type="password" autoComplete="new-password" placeholder="Новий пароль (мін. 6)" value={pw} onChange={(e) => setPw(e.target.value)} />
+        <button className="btn pri" disabled={pw.length < 6} onClick={async () => {
+          const { error } = await sb.auth.updateUser({ password: pw });
+          if (error) s.flash(error.message, 'err'); else { setPw(''); s.flash('Пароль змінено'); }
+        }}>Змінити</button></div>
     </div>
   );
 }
