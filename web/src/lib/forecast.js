@@ -127,10 +127,12 @@ export function simulate({ params: p, debts, streams, categories, goals, account
       income += streamIncome(s, o.scenario);
     }
     income += (+o.extraShifts || 0) * (+p.avg_shift_net || 0);
+    if (!o.extraFrom || k >= o.extraFrom) income += +o.extraIncome || 0;
 
-    const living = livingCosts(categories, p, afterMove, +o.foodCut || 0).total;
-    const oneTime = k === moveYM
+    const living = r2(livingCosts(categories, p, afterMove, +o.foodCut || 0).total + (!o.extraFrom || k >= o.extraFrom ? (+o.extraExpense || 0) : 0));
+    let oneTime = k === moveYM
       ? r2((+p.rent_future_usd) * (+p.usd_rate) * (+p.rent_share) * (+p.move_extra_months || 0)) : 0;
+    for (const x of o.oneTimes || []) if (x.ym === k) oneTime = r2(oneTime + (+x.amount || 0));
 
     let oblig = 0, interest = 0;
     for (const d of ds) {
@@ -268,4 +270,69 @@ export function allocateIncome(amount, { params: p, debts, categories, goals, ac
   if (strategy === 'cushion_first') { toCushion(); toDebt(); } else { toDebt(); toCushion(); }
   if (left > 0) plan.push({ label: 'Залишок', amount: r2(left), kind: 'rest' });
   return plan;
+}
+
+const ymDiff = (a, b) => (a && b ? (+a.slice(0, 4) * 12 + +a.slice(5)) - (+b.slice(0, 4) * 12 + +b.slice(5)) : null);
+
+/**
+ * Порівняння сценарію з базою. delta: { extraIncome, extraExpense, oneTime: {amount, date}, moveDate, extraShifts, foodCut }
+ * Повертає зсуви ключових дат (у місяцях; від'ємне = раніше) і різницю грошей через 6/12 міс.
+ */
+export function whatIf(input, delta = {}, baseOpts = {}) {
+  const base = simulate({ ...input, opts: { ...baseOpts } });
+  const o = { ...baseOpts };
+  if (delta.extraIncome) o.extraIncome = +delta.extraIncome;
+  if (delta.extraExpense) o.extraExpense = +delta.extraExpense;
+  if (delta.extraShifts) o.extraShifts = +delta.extraShifts;
+  if (delta.foodCut) o.foodCut = +delta.foodCut;
+  if (delta.moveDate) o.moveDate = delta.moveDate;
+  if (delta.from) o.extraFrom = ym(delta.from);
+  if (delta.oneTime?.amount) o.oneTimes = [{ ym: ym(delta.oneTime.date || new Date()), amount: +delta.oneTime.amount }];
+  const sc = simulate({ ...input, opts: o });
+  const pick = (r, i) => r.rows[Math.min(i, r.rows.length - 1)];
+  return {
+    base: { cushion: base.cushionYM, limit: base.creditLineFreeYM, debtFree: base.debtFreeYM, cost: r2(base.interestTotal + base.feeTotal) },
+    scenario: { cushion: sc.cushionYM, limit: sc.creditLineFreeYM, debtFree: sc.debtFreeYM, cost: r2(sc.interestTotal + sc.feeTotal) },
+    shift: { cushion: ymDiff(sc.cushionYM, base.cushionYM), limit: ymDiff(sc.creditLineFreeYM, base.creditLineFreeYM), debtFree: ymDiff(sc.debtFreeYM, base.debtFreeYM) },
+    cash6: r2(pick(sc, 5).cash - pick(base, 5).cash), cash12: r2(pick(sc, 11).cash - pick(base, 11).cash),
+    debt12: r2(pick(sc, 11).totalDebt - pick(base, 11).totalDebt),
+    saved: r2((base.interestTotal + base.feeTotal) - (sc.interestTotal + sc.feeTotal)),
+    warnings: sc.warnings.slice(0, 3),
+    target: base.target,
+  };
+}
+
+// Людський опис ефекту
+export function describeEffect(w) {
+  const m = (n) => (n === null || n === 0 ? null : n < 0 ? `на ${-n} міс раніше` : `на ${n} міс пізніше`);
+  const parts = [];
+  if (m(w.shift.cushion)) parts.push(`подушка ${m(w.shift.cushion)}${w.scenario.cushion ? ` (${ymLabel(w.scenario.cushion)})` : ''}`);
+  if (m(w.shift.limit)) parts.push(`ліміт Моно закрито ${m(w.shift.limit)}`);
+  if (m(w.shift.debtFree)) parts.push(`усі борги ${m(w.shift.debtFree)}`);
+  const pos = w.cash12 - w.debt12; // більше грошей і менше боргу = краще
+  parts.push(`через рік: ${pos >= 0 ? '+' : '−'}${Math.round(Math.abs(pos)).toLocaleString('uk-UA')} ₴ до чистого стану`);
+  if (w.saved > 1) parts.push(`менше відсотків на ${Math.round(w.saved).toLocaleString('uk-UA')} ₴`);
+  if (w.warnings.length) parts.push(`увага: ${w.warnings[0]}`);
+  return parts.join('; ');
+}
+
+// Скільки можна витратити сьогодні: гнучкі конверти мінус витрачене, поділено на дні, що лишились.
+export const FLEX_ROLES = ['food', 'leisure', null, 'subscriptions'];
+export function safeToSpend({ categories, transactions, params, today = new Date() }) {
+  const m = ym(today);
+  const dim = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const daysLeft = dim - today.getDate() + 1;
+  const flex = (categories || []).filter((c) => c.kind === 'expense' && ['food', 'leisure'].includes(c.role) || (c.kind === 'expense' && !c.role));
+  const ids = new Set(flex.map((c) => c.id));
+  const budget = flex.reduce((s, c) => s + (+c.monthly_budget || 0), 0);
+  const tStr = `${m}-${String(today.getDate()).padStart(2, '0')}`;
+  let spentBefore = 0, spentToday = 0;
+  for (const t of transactions || []) {
+    if (!ids.has(t.category_id) || +t.amount >= 0 || !t.occurred_at?.startsWith(m)) continue;
+    const v = -t.amount * (t.currency === 'USD' ? +params.usd_rate : 1);
+    if (t.occurred_at.slice(0, 10) === tStr) spentToday += v; else spentBefore += v;
+  }
+  const leftForMonth = budget - spentBefore;
+  const perDay = Math.max(0, leftForMonth / daysLeft);
+  return { perDay: r2(perDay), today: r2(perDay - spentToday), spentToday: r2(spentToday), leftMonth: r2(leftForMonth - spentToday), budget: r2(budget), daysLeft };
 }

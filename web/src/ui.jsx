@@ -16,6 +16,9 @@ const P = {
   left: 'M15 18l-6-6 6-6', right: 'M9 18l6-6-6-6',
   trash: 'M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6',
   refresh: 'M21 12a9 9 0 11-3-6.7L21 8M21 3v5h-5',
+  mic: 'M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v3',
+  brain: 'M9 3a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 002 5 3 3 0 006 2V3zM15 3a3 3 0 013 3 3 3 0 012 5 3 3 0 01-2 5 3 3 0 01-6 2',
+  bulb: 'M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z',
 };
 export const Icon = ({ n, size }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={size ? { width: size, height: size } : null}>
@@ -62,4 +65,29 @@ export function Md({ text }) {
   }
   if (list) out.push(`<ul>${list.join('')}</ul>`);
   return <div dangerouslySetInnerHTML={{ __html: out.join('') }} />;
+}
+
+export function Ring({ pct, size = 54, stroke = 6, color = '#fff', track = 'rgba(255,255,255,.25)', children }) {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r, p = Math.max(0, Math.min(1, pct || 0));
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flex: 'none' }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={track} strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - p)} style={{ transition: 'stroke-dashoffset .6s' }} />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 700 }}>{children}</div>
+    </div>
+  );
+}
+
+export function Celebrate({ party, onClose }) {
+  useEffect(() => { const t = setTimeout(onClose, 4500); return () => clearTimeout(t); }, [party, onClose]);
+  const colors = ['#4338ca', '#059669', '#f59e0b', '#db2777', '#0ea5e9'];
+  return (
+    <div className="celebrate" onClick={onClose}>
+      {Array.from({ length: 36 }, (_, i) => (
+        <i key={i} className="confetti" style={{ left: `${(i * 37) % 100}%`, background: colors[i % 5], animationDelay: `${(i % 9) * 0.12}s` }} />))}
+      <div className="box"><div className="emoji">{party.emoji}</div><h2 style={{ margin: '8px 0 6px' }}>{party.title}</h2><div className="muted" style={{ fontSize: 15 }}>{party.text}</div></div>
+    </div>
+  );
 }

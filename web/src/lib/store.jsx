@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { sb } from './supa.js';
-import { addDays, todayStr, nextRecurrence } from './util.js';
+import { addDays, todayStr, nextRecurrence, habitStreak } from './util.js';
 
 const Ctx = createContext(null);
 export const useStore = () => useContext(Ctx);
@@ -21,12 +21,16 @@ const LOADERS = {
   habits: () => sb.from('habits').select('*').order('sort'),
   habitLogs: () => sb.from('habit_logs').select('*').gte('day', addDays(todayStr(), -60)),
   dates: () => sb.from('important_dates').select('*').order('date'),
+  facts: () => sb.from('ai_facts').select('*').eq('active', true).order('created_at'),
+  advice: () => sb.from('ai_advice').select('*').order('created_at', { ascending: false }).limit(40),
 };
 
 export function StoreProvider({ children }) {
   const [data, setData] = useState({});
   const [ready, setReady] = useState(false);
   const [toast, setToast] = useState(null);
+  const [party, setParty] = useState(null);
+  const [capture, setCapture] = useState(false);
 
   const reload = useCallback(async (keys) => {
     const ks = keys || Object.keys(LOADERS);
@@ -56,6 +60,10 @@ export function StoreProvider({ children }) {
 
   const api = useMemo(() => ({
     reload, flash,
+    celebrate: (title, text, emoji = '🎉') => setParty({ title, text, emoji, id: Date.now() }),
+    closeParty: () => setParty(null),
+    openCapture: () => setCapture(true),
+    closeCapture: () => setCapture(false),
     async insert(table, row, key) {
       const { data: r, error } = await sb.from(table).insert(row).select().single();
       if (error) { flash(error.message, 'err'); throw error; }
@@ -96,9 +104,14 @@ export function StoreProvider({ children }) {
       const ex = (data.habitLogs || []).find((l) => l.habit_id === h.id && l.day === day);
       if (ex) await sb.from('habit_logs').delete().eq('id', ex.id);
       else await sb.from('habit_logs').insert({ habit_id: h.id, day, value: 1 });
-      await reload(['habitLogs']);
+      const { data: logs } = await sb.from('habit_logs').select('*').gte('day', addDays(todayStr(), -60));
+      setData((d) => ({ ...d, habitLogs: logs || [] }));
+      if (!ex) {
+        const st = habitStreak(h, logs || []);
+        if ([3, 7, 14, 21, 30, 50, 100].includes(st)) setParty({ title: `${st} ${st < 5 ? 'дні' : 'днів'} поспіль`, text: `«${h.name}» — серія триває. Не зривай ланцюжок.`, emoji: '🔥', id: Date.now() });
+      }
     },
   }), [reload, flash, data.params, data.checklist, data.habitLogs]);
 
-  return <Ctx.Provider value={{ ...data, ready, toast, ...api }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ ...data, ready, toast, party, capture, ...api }}>{children}</Ctx.Provider>;
 }

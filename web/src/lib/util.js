@@ -81,3 +81,29 @@ export function toCSV(rows) {
   };
   return '﻿' + [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
 }
+
+// Серія звички: дні (daily/weekly:будні) або тижні (weekly:7) поспіль до сьогодні
+export function habitStreak(h, logs) {
+  const days = new Set((logs || []).filter((l) => l.habit_id === h.id).map((l) => l.day));
+  if (h.schedule === 'monthly') return 0;
+  const sched = (h.schedule || 'daily').startsWith('weekly') ? (h.schedule.split(':')[1] || '').split(',').map(Number).filter(Boolean) : [];
+  const t = todayStr();
+  if (sched.length === 1) { // раз на тиждень
+    let n = 0, d = t;
+    for (let w = 0; w < 30; w++) {
+      const wk = Array.from({ length: 7 }, (_, i) => addDays(d, -i));
+      if (wk.some((x) => days.has(x))) n++; else if (w > 0) break;
+      d = addDays(d, -7);
+    }
+    return n;
+  }
+  let n = 0, d = days.has(t) ? t : addDays(t, -1);
+  for (let i = 0; i < 365; i++) {
+    const dw = ((new Date(d + 'T12:00:00').getDay() + 6) % 7) + 1;
+    const due = !sched.length || sched.includes(dw);
+    if (due) { if (days.has(d)) n++; else break; }
+    d = addDays(d, -1);
+  }
+  return n;
+}
+export const kShort = (n) => { const v = Math.abs(+n || 0); const s = v >= 10000 ? `${(v / 1000).toFixed(v >= 100000 ? 0 : 1).replace('.0', '')}к` : Math.round(v).toLocaleString('uk-UA').replace(/\u00a0|,/g, ' '); return (n < 0 ? '−' : '') + s; };

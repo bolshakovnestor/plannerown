@@ -8,7 +8,7 @@ import { commuteCost, housingAfterMove } from '../lib/forecast.js';
 const PARAMS = [
   ['Авто і дорога', [['diesel_price', 'Дизель, ₴/л'], ['consumption_l100', 'Витрата, л/100 км'], ['commute_km_oneway', 'До роботи, км (в один бік)'], ['workdays_month', 'Робочих днів/міс'], ['maintenance_per_km', 'ТО, ₴/км']]],
   ["З'їзд", [['move_in_date', "Дата з'їзду", 'date'], ['rent_future_usd', 'Оренда, $/міс (повна)'], ['utilities_future', 'Комуналка, ₴/міс'], ['rent_share', 'Твоя частка (0.5 = навпіл)'], ['move_extra_months', 'Депозит, міс оренди'], ['food_after_move', "Їжа після з'їзду (твоя частка)"], ['leisure_after_move', 'Дозвілля після з\'їзду']]],
-  ['Доходи і курс', [['avg_shift_net', 'Середня зміна Уклон, ₴ чистими'], ['usd_rate', 'Курс $, ₴']]],
+  ['Доходи і курс', [['avg_shift_net', 'Середня зміна Уклон, ₴ чистими'], ['avg_shift_hours', 'Тривалість зміни, год'], ['usd_rate', 'Курс $, ₴']]],
   ['Claude', [['ai_budget_usd', 'Ліміт AI, $/міс'], ['brief_time', 'Ранковий бриф', 'time']]],
 ];
 
@@ -96,6 +96,12 @@ export default function Settings({ go }) {
       ))}
       <button className="btn pri block" style={{ marginBottom: 12 }} onClick={saveParams}>Зберегти параметри</button>
 
+      <div className="card"><h3>Claude</h3>
+        <div className="row wrap" style={{ gap: 8 }}>
+          <button className="btn" onClick={() => go('memory')}>🧠 Що Claude знає</button>
+          <button className="btn" onClick={() => go('claude?interview')}>👋 Пройти знайомство ще раз</button>
+        </div>
+      </div>
       <Goals /><Spheres /><Habits /><Dates />
 
       <div className="card"><h3>Експорт</h3>

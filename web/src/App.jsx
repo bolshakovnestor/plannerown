@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { sb } from './lib/supa.js';
 import { StoreProvider, useStore } from './lib/store.jsx';
-import { Icon } from './ui.jsx';
+import { uah } from './lib/util.js';
+import { Icon, Celebrate } from './ui.jsx';
+import Capture from './components/Capture.jsx';
+import Memory from './pages/Memory.jsx';
 import Today from './pages/Today.jsx';
 import Plan from './pages/Plan.jsx';
 import Money from './pages/Money.jsx';
@@ -9,10 +12,9 @@ import Forecast from './pages/Forecast.jsx';
 import Claude from './pages/Claude.jsx';
 import Settings from './pages/Settings.jsx';
 
-const TABS = [
-  ['today', 'Сьогодні', 'today'], ['plan', 'Планер', 'plan'], ['money', 'Гроші', 'money'],
-  ['forecast', 'Прогноз', 'chart'], ['claude', 'Claude', 'claude'],
-];
+const LEFT = [['today', 'Сьогодні', 'today'], ['plan', 'План', 'plan']];
+const RIGHT = [['money', 'Гроші', 'money'], ['claude', 'Claude', 'claude']];
+const PARENT = { forecast: 'money', memory: 'claude', settings: 'today' };
 const useHash = () => {
   const get = () => (window.location.hash.replace('#', '').split('?')[0] || 'today');
   const [h, setH] = useState(get);
@@ -24,16 +26,36 @@ function Shell() {
   const s = useStore();
   const [tab, go] = useHash();
   useEffect(() => { window.scrollTo(0, 0); }, [tab]);
+  useEffect(() => { if (tab === 'capture') s.openCapture(); }, [tab]); // eslint-disable-line
+  // Святкування: закритий борг або досягнута подушка (один раз)
+  useEffect(() => {
+    if (!s.ready || !s.debts) return;
+    let seen = []; try { seen = JSON.parse(localStorage.getItem('seen-ms') || '[]'); } catch { /* */ }
+    const first = !localStorage.getItem('seen-ms');
+    for (const d of s.debts) {
+      const k = 'debt:' + d.id;
+      if ((!d.is_active || +d.balance <= 0) && !seen.includes(k)) {
+        seen.push(k);
+        if (!first) s.celebrate('Борг закрито!', `«${d.name}» — нуль. Мінус ${uah(d.monthly_payment)} щомісяця.`, '🏔');
+      }
+    }
+    try { localStorage.setItem('seen-ms', JSON.stringify(seen)); } catch { /* */ }
+  }, [s.ready, s.debts]); // eslint-disable-line
   if (!s.ready || !s.params) return <div className="login"><div className="muted">Завантаження…</div></div>;
-  const Page = { today: Today, plan: Plan, money: Money, forecast: Forecast, claude: Claude, settings: Settings }[tab] || Today;
+  const page = tab === 'capture' ? 'today' : tab;
+  const Page = { today: Today, plan: Plan, money: Money, forecast: Forecast, claude: Claude, settings: Settings, memory: Memory }[page] || Today;
+  const active = PARENT[page] || page;
+  const Btn = ([k, label, icon]) => <button key={k} className={active === k ? 'on' : ''} onClick={() => go(k)}><Icon n={icon} />{label}</button>;
   return (
     <>
       <div className="app"><Page go={go} /></div>
-      <nav className="nav"><div className="nav-in">
-        {TABS.map(([k, label, icon]) => (
-          <button key={k} className={tab === k ? 'on' : ''} onClick={() => go(k)}><Icon n={icon} />{label}</button>
-        ))}
+      <nav className="nav"><div className="nav-in v2">
+        {LEFT.map(Btn)}
+        <button className="mic-btn" onClick={() => s.openCapture()} aria-label="Сказати або записати"><Icon n="mic" /></button>
+        {RIGHT.map(Btn)}
       </div></nav>
+      {s.capture && <Capture />}
+      {s.party && <Celebrate party={s.party} onClose={s.closeParty} />}
       {s.toast && <div className={`toast ${s.toast.kind === 'err' ? 'err' : ''}`}>{s.toast.msg}</div>}
     </>
   );

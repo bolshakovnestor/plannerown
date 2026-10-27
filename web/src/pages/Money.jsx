@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import { sb, fn } from '../lib/supa.js';
 import { Icon, Sheet, Bar } from '../ui.jsx';
-import { liquidNow, nextDue, allocateIncome, commuteCost } from '../lib/forecast.js';
+import { liquidNow, nextDue, allocateIncome, commuteCost, simulate, ymLabel } from '../lib/forecast.js';
+import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
 import { uah, money2, todayStr, prettyDate } from '../lib/util.js';
 import { monthStats } from './Today.jsx';
 
 const KIND = { credit_line: 'Кредитна лінія', installment: 'Розстрочка', annuity_loan: 'Кредит (ануїтет)' };
 
-export default function Money() {
+export default function Money({ go }) {
   const [tab, setTab] = useState(() => localStorage.getItem('money-tab') || 'overview');
   const pick = (t) => { setTab(t); try { localStorage.setItem('money-tab', t); } catch { /* */ } };
   const [txOpen, setTxOpen] = useState(null);
@@ -17,10 +18,10 @@ export default function Money() {
       <div className="top"><h1>Гроші</h1>
         <button className="btn pri sm" onClick={() => setTxOpen({})}><Icon n="plus" size={16} />Операція</button></div>
       <div className="seg" style={{ marginBottom: 12, width: '100%', display: 'flex' }}>
-        {[['overview', 'Огляд'], ['tx', 'Операції'], ['debts', 'Борги'], ['budget', 'Бюджет']].map(([k, l]) => (
+        {[['overview', 'Огляд'], ['tx', 'Операції'], ['debts', 'Борги']].map(([k, l]) => (
           <button key={k} style={{ flex: 1 }} className={tab === k ? 'on' : ''} onClick={() => pick(k)}>{l}</button>))}
       </div>
-      {tab === 'overview' && <Overview />}
+      {(tab === 'overview' || tab === 'budget') && <Overview go={go} />}
       {tab === 'tx' && <Transactions onOpen={setTxOpen} />}
       {tab === 'debts' && <Debts />}
       {tab === 'budget' && <Budget />}
@@ -29,55 +30,110 @@ export default function Money() {
   );
 }
 
-function Overview() {
+function Overview({ go }) {
   const s = useStore();
   const [editAcc, setEditAcc] = useState(null);
+  const [editCat, setEditCat] = useState(null);
   const [alloc, setAlloc] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [showAcc, setShowAcc] = useState(false);
+  const input = { params: s.params, debts: s.debts, streams: s.streams, categories: s.categories, goals: s.goals, accounts: s.accounts };
+  const sim = useMemo(() => simulate({ ...input, opts: { months: 36 } }), [s.debts, s.streams, s.categories, s.goals, s.accounts, s.params]); // eslint-disable-line
   const liquid = liquidNow(s.accounts, s.params);
-  const totalDebt = (s.debts || []).filter((d) => d.is_active).reduce((a, d) => a + (+d.balance), 0);
-  const plan = +alloc > 0 ? allocateIncome(+alloc, { params: s.params, debts: s.debts, categories: s.categories, goals: s.goals, accounts: s.accounts }) : [];
+  const debtNow = s.debts.filter((d) => d.is_active).reduce((a, d) => a + (+d.balance), 0);
+  const debtStart = +s.params.debt_start_total || debtNow;
+  const paidPct = debtStart ? Math.max(0, (debtStart - debtNow) / debtStart) : 0;
+  const ms = monthStats(s);
+  const plan = +alloc > 0 ? allocateIncome(+alloc, input) : [];
+
+  // Віхи: кожен борг до нуля + подушка
+  const milestones = [];
+  const names = [...new Set(sim.rows.flatMap((r) => Object.keys(r.perDebt)))].filter((n) => !/Конвертація/.test(n));
+  for (const n of names) {
+    const debt = s.debts.find((d) => d.name === n);
+    const done = debt && (!debt.is_active || +debt.balance <= 0);
+    const isLine = debt?.kind === 'credit_line';
+    const row = sim.rows.find((r) => (r.perDebt[n] ?? 0) <= 1 && (!isLine || Object.entries(r.perDebt).filter(([k]) => /Конвертація/.test(k)).every(([, v]) => v <= 1)));
+    milestones.push({ key: n, label: isLine ? `${n} (з конвертацією) = 0` : `${n} = 0`, ym: done ? 'done' : row?.ym || null, done });
+  }
+  milestones.push({ key: 'cushion', label: `Подушка ${uah(sim.target)}`, ym: liquid >= sim.target ? 'done' : sim.cushionYM, done: liquid >= sim.target });
+  milestones.sort((a, b) => (a.done ? -1 : b.done ? 1 : 0) || String(a.ym || '9999').localeCompare(String(b.ym || '9999')));
+  const chart = [{ label: 'зараз', борг: debtNow }, ...sim.rows.map((r) => ({ label: r.label, борг: r.totalDebt }))];
+
   const sync = async () => {
     setSyncing(true);
     try { await fn('assistant', { action: 'mono_balances' }); await s.reload(['accounts', 'debts', 'transactions']); s.flash('Баланси Моно оновлено'); }
     catch (e) { s.flash(e.message, 'err'); }
     setSyncing(false);
   };
+  const env = s.categories.filter((c) => c.kind === 'expense' && +c.monthly_budget > 0);
+
   return (
     <>
-      <div className="grid2" style={{ marginBottom: 12 }}>
-        <div className="kpi"><div className="l">Власні гроші</div><div className="v num pos">{uah(liquid)}</div></div>
-        <div className="kpi"><div className="l">Загальний борг</div><div className="v num neg">{uah(totalDebt)}</div></div>
-      </div>
       <div className="card">
-        <h3>Рахунки <button className="btn ghost sm act" onClick={sync} disabled={syncing}><Icon n="refresh" size={15} />{syncing ? '…' : 'Моно'}</button></h3>
-        {s.accounts.map((a) => {
+        <h3>Гора боргу <button className="btn ghost sm act" onClick={() => go('forecast')}>А що як…</button></h3>
+        <div className="mountain-kpi"><span className="big num">{uah(debtNow)}</span><span className="muted">знято {Math.round(paidPct * 100)}%</span></div>
+        <div style={{ height: 150, marginTop: 6 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chart} margin={{ left: 0, right: 4, top: 6, bottom: 0 }}>
+              <defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#4338ca" stopOpacity={0.35} /><stop offset="100%" stopColor="#4338ca" stopOpacity={0.02} /></linearGradient></defs>
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={5} axisLine={false} tickLine={false} />
+              <Tooltip formatter={(v) => uah(v)} contentStyle={{ borderRadius: 10, fontSize: 12 }} />
+              <Area dataKey="борг" stroke="#4338ca" strokeWidth={2.5} fill="url(#mg)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="mt">
+          {milestones.map((m) => (
+            <div key={m.key} className={`milestone ${m.done ? 'done' : ''}`}>
+              <span className="dotm">{m.done ? '✓' : '⛳'}</span>
+              <div className="grow">{m.label}</div>
+              <span className={m.done ? 'pos small' : 'muted small'}>{m.done ? 'готово' : m.ym ? ymLabel(m.ym) : '> 3 років'}</span>
+            </div>
+          ))}
+        </div>
+        {sim.warnings.length > 0 && <div className="tag bad mt">Касовий розрив: {sim.warnings[0]}</div>}
+      </div>
+
+      <div className="card">
+        <h3>Конверти місяця <span className="muted act">витрачено {uah(ms.spent)} з {uah(ms.budget)}</span></h3>
+        {env.map((c) => {
+          const v = ms.byCat[c.id] || 0, left = +c.monthly_budget - v, pct = v / (+c.monthly_budget || 1);
+          return (
+            <div key={c.id} className="env" onClick={() => setEditCat(c)}>
+              <div className="between"><span className="row small"><span className="dot" style={{ background: c.color }} />{c.name}</span>
+                <span><span className={`left num ${left < 0 ? 'neg' : ''}`}>{left < 0 ? '−' : ''}{uah(Math.abs(left), { noCur: true })}</span><span className="muted small"> {left < 0 ? 'понад' : 'лишилось'}</span></span></div>
+              <div style={{ marginTop: 6 }}><Bar value={v} max={+c.monthly_budget} tone={pct > 1 ? 'bad' : pct > 0.85 ? 'warn' : 'ok'} /></div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card">
+        <h3>Гроші зараз <button className="btn ghost sm act" onClick={sync} disabled={syncing}><Icon n="refresh" size={15} />{syncing ? '…' : 'Моно'}</button></h3>
+        <div className="between"><span className="big num pos" style={{ fontSize: 24 }}>{uah(liquid)}</span><button className="btn ghost sm" onClick={() => setShowAcc(!showAcc)}>{showAcc ? 'Сховати' : 'Рахунки'}</button></div>
+        {showAcc && s.accounts.map((a) => {
           const own = a.kind === 'credit_card' ? (+a.balance - (+a.credit_limit || 0)) : +a.balance;
           return (
             <div key={a.id} className="list-row" onClick={() => setEditAcc(a)} style={{ cursor: 'pointer' }}>
-              <div className="grow"><div>{a.name}</div>
-                <div className="muted">{a.mono_account_id ? (a.mono_account_id.startsWith('pan:') ? 'Моно (ще не синхронізовано)' : 'Моно · авто') : 'вручну'}
-                  {a.kind === 'credit_card' && a.credit_limit ? ` · доступно ${uah(a.balance)} з ліміту ${uah(a.credit_limit)}` : ''}</div></div>
+              <div className="grow"><div>{a.name}</div><div className="muted">{a.mono_account_id ? (a.mono_account_id.startsWith('pan:') ? 'Моно · ще не синхронізовано' : 'Моно · авто') : 'вручну'}</div></div>
               <b className={`num ${own < 0 ? 'neg' : ''}`}>{a.currency === 'USD' ? `$${money2(own)}` : `${money2(own)} ₴`}</b>
             </div>
           );
         })}
       </div>
+
       <div className="card">
-        <h3>Розподілити надходження</h3>
-        <input className="input" type="number" inputMode="decimal" placeholder="Сума, що прийшла (₴)" value={alloc} onChange={(e) => setAlloc(e.target.value)} />
-        {plan.length > 0 && (
-          <div className="mt">
-            {plan.map((p, i) => (
-              <div key={i} className="list-row"><span className={`tag ${p.kind === 'obligation' ? 'bad' : p.kind === 'cushion' ? 'ok' : p.kind === 'debt' ? 'warn' : 'grey'}`}>
-                {{ obligation: 'платіж', living: 'життя', cushion: 'подушка', debt: 'борг', rest: 'вільно' }[p.kind]}</span>
-                <div className="grow small">{p.label}</div><b className="num">{uah(p.amount)}</b></div>
-            ))}
-            <div className="muted mt">Стратегія: {s.params.strategy === 'cushion_first' ? 'спершу подушка до з\'їзду' : 'спершу борги'} (змінюється в Прогнозі). Розстрочки 0% достроково не гасимо.</div>
-          </div>
-        )}
+        <h3>Прийшли гроші? Розподілю</h3>
+        <input className="input" type="number" inputMode="decimal" placeholder="Сума, ₴" value={alloc} onChange={(e) => setAlloc(e.target.value)} />
+        {plan.map((p, i) => (
+          <div key={i} className="list-row"><span className={`tag ${p.kind === 'obligation' ? 'bad' : p.kind === 'cushion' ? 'ok' : p.kind === 'debt' ? 'warn' : 'grey'}`}>
+            {{ obligation: 'платіж', living: 'життя', cushion: 'подушка', debt: 'борг', rest: 'вільно' }[p.kind]}</span>
+            <div className="grow small">{p.label}</div><b className="num">{uah(p.amount)}</b></div>
+        ))}
       </div>
       {editAcc && <AccountEditor a={editAcc} onClose={() => setEditAcc(null)} />}
+      {editCat && <Sheet title={editCat.name} onClose={() => setEditCat(null)}><BudgetForm c={editCat} onClose={() => setEditCat(null)} /></Sheet>}
     </>
   );
 }

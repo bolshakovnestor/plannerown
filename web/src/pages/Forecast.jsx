@@ -9,7 +9,7 @@ const COLORS = ['#dc2626', '#f59e0b', '#8b5cf6', '#0ea5e9', '#4338ca', '#059669'
 const k = (v) => `${Math.round(v / 1000)}к`;
 const tip = { contentStyle: { borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }, formatter: (v) => uah(v) };
 
-export default function Forecast() {
+export default function Forecast({ go }) {
   const s = useStore();
   const p = s.params;
   const [o, setO] = useState({
@@ -54,7 +54,7 @@ export default function Forecast() {
 
   return (
     <>
-      <div className="top"><h1>Прогноз</h1><span className="muted">на {o.months} міс</span></div>
+      <div className="top"><div className="row"><button className="btn ghost" onClick={() => go('money')}><Icon n="left" /></button><h1>А що як…</h1></div><span className="muted">на {o.months} міс</span></div>
 
       <div className="grid2" style={{ marginBottom: 12 }}>
         <div className="kpi"><div className="l">Подушка {uah(sim.target)}</div><div className="v">{sim.cushionYM ? ymLabel(sim.cushionYM) : '> 2 років'}{changed && delta(sim.cushionYM, base.cushionYM)}</div></div>
