@@ -19,6 +19,16 @@ Deno.serve(async (req) => {
       const db = admin();
       if (new URL(req.url).searchParams.get("k") !== await cfg(db, "cron_secret")) return new Response("forbidden", { status: 403 });
       const uid = (await cfg(db, "owner_uid"))!;
+      const t = new URL(req.url).searchParams.get("t");
+      if (t) {
+        // Прогін дії асистента від імені власника (тільки з секретом)
+        const { data: u } = await db.auth.admin.getUserById(uid);
+        const { data: link } = await db.auth.admin.generateLink({ type: "magiclink", email: u.user!.email! });
+        const { data: ses } = await db.auth.verifyOtp({ token_hash: link.properties!.hashed_token, type: "magiclink" });
+        const body = JSON.parse(atob(new URL(req.url).searchParams.get("b") || "e30="));
+        const r2 = new Request("http://x/assistant", { method: "POST", headers: { Authorization: `Bearer ${ses.session!.access_token}`, "content-type": "application/json" }, body: JSON.stringify({ action: t, ...body }) });
+        return await assistant(r2);
+      }
       const out = await claude(db, uid, { model: "claude-haiku-5-5", max_tokens: 300, messages: [{ role: "user", content: "Скажи одним реченням українською: тест пройдено." }] });
       return new Response(JSON.stringify(out), { headers: { "content-type": "application/json" } });
     }
