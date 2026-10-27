@@ -488,6 +488,34 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ ok: true });
     }
 
+    if (body.action === "transcribe") {
+      const key = Deno.env.get("OPENAI_API_KEY");
+      if (!key) return json({ error: "NO_OPENAI_KEY" }, 400);
+      const bin = Uint8Array.from(atob(body.audio || ""), (c) => c.charCodeAt(0));
+      if (bin.length < 1000) return json({ text: "" });
+      const mime = String(body.mime || "audio/webm").split(";")[0];
+      const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : mime.includes("wav") ? "wav" : "webm";
+      const prompt = "Нестор диктує українською: витрати в гривнях, задачі, звички. Слова: Уклон, Моно, монобанк, Crédit Agricole, ІФЦем, деканат, mate.academy, ТТТ, АТБ, Сільпо, ОККО, WOG, молитва, Біблія, сповідь.";
+      let lastErr = "";
+      for (const model of ["gpt-4o-transcribe", "whisper-1"]) {
+        const fd = new FormData();
+        fd.append("file", new Blob([bin], { type: mime }), `voice.${ext}`);
+        fd.append("model", model);
+        fd.append("language", "uk");
+        fd.append("prompt", prompt);
+        const r = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: fd });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) {
+          const secs = Math.max(1, Number(body.seconds) || bin.length / 4000);
+          await db.from("ai_usage").insert({ user_id: uid, model, input_tokens: 0, output_tokens: 0, cost_usd: (secs / 60) * 0.006 });
+          return json({ text: String(j.text || "").trim(), model });
+        }
+        lastErr = j?.error?.message || `HTTP ${r.status}`;
+        if (r.status === 401 || r.status === 429) break;
+      }
+      return json({ error: "Розпізнавання: " + lastErr }, 502);
+    }
+
     if (body.action === "push_test") {
       const n = await sendPush(db, uid, "Планер", "Сповіщення працюють ✓");
       return json({ ok: true, sent: n });

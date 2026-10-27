@@ -5,31 +5,81 @@ import { Icon } from '../ui.jsx';
 import { todayStr, prettyDate } from '../lib/util.js';
 
 const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+const CAN_REC = typeof window !== 'undefined' && !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+let serverOK = true; // false, якщо на сервері немає ключа розпізнавання
 
-export function useSpeech(onText) {
+const toB64 = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.readAsDataURL(blob); });
+
+/** Голос: запис аудіо → серверне розпізнавання (Whisper/gpt-4o). Запасний варіант — розпізнавання браузера. */
+export function useSpeech(onText, onError) {
   const [rec, setRec] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [secs, setSecs] = useState(0);
   const [interim, setInterim] = useState('');
-  const ref = useRef(null);
-  const stop = () => { try { ref.current?.stop(); } catch { /* */ } setRec(false); setInterim(''); };
-  const start = () => {
+  const r = useRef({});
+  const cb = useRef({ onText, onError }); cb.current = { onText, onError };
+
+  const startBrowser = () => {
     if (!SR) return false;
-    const r = new SR();
-    r.lang = 'uk-UA'; r.continuous = true; r.interimResults = true;
-    r.onresult = (e) => {
-      let fin = '', mid = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) fin += e.results[i][0].transcript; else mid += e.results[i][0].transcript;
-      }
-      if (fin) onText(fin.trim());
-      setInterim(mid);
+    r.current.want = true;
+    const run = () => {
+      const x = new SR(); x.lang = 'uk-UA'; x.continuous = false; x.interimResults = true;
+      x.onresult = (e) => {
+        const res = e.results[e.results.length - 1];
+        if (res.isFinal) { cb.current.onText(res[0].transcript.trim()); setInterim(''); } else setInterim(res[0].transcript);
+      };
+      x.onend = () => { if (r.current.want) { try { run(); } catch { setRec(false); } } else { setRec(false); setInterim(''); } };
+      x.onerror = (e) => { if (e.error === 'not-allowed') { r.current.want = false; setRec(false); } };
+      r.current.sr = x; x.start();
     };
-    r.onend = () => { setRec(false); setInterim(''); };
-    r.onerror = () => { setRec(false); setInterim(''); };
-    ref.current = r; r.start(); setRec(true);
+    run(); setRec(true); return true;
+  };
+
+  const start = async () => {
+    if (rec || busy) return;
+    if (!serverOK || !CAN_REC) return startBrowser();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find((m) => MediaRecorder.isTypeSupported?.(m)) || '';
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const chunks = [];
+      mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(r.current.timer); setRec(false);
+        const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
+        const seconds = Math.round((Date.now() - r.current.t0) / 1000);
+        if (blob.size < 1500) return;
+        setBusy(true);
+        try {
+          const out = await fn('assistant', { action: 'transcribe', audio: await toB64(blob), mime: blob.type, seconds });
+          if (out.text) cb.current.onText(out.text);
+        } catch (e) {
+          if (String(e.message).includes('NO_OPENAI_KEY')) { serverOK = false; cb.current.onError?.('Немає ключа OPENAI_API_KEY — поки що голос браузера. Надиктуй ще раз.'); }
+          else cb.current.onError?.(e.message);
+        }
+        setBusy(false);
+      };
+      r.current.mr = mr; r.current.t0 = Date.now(); setSecs(0);
+      r.current.timer = setInterval(() => {
+        const sec = Math.round((Date.now() - r.current.t0) / 1000); setSecs(sec);
+        if (sec >= 180) mr.stop();
+      }, 500);
+      mr.start(1000); setRec(true);
+    } catch (e) {
+      cb.current.onError?.(e.name === 'NotAllowedError' ? 'Дозволь доступ до мікрофона в налаштуваннях браузера' : e.message);
+    }
     return true;
   };
-  useEffect(() => () => { try { ref.current?.abort(); } catch { /* */ } }, []);
-  return { supported: !!SR, rec, interim, start, stop };
+  const stop = () => {
+    r.current.want = false;
+    try { r.current.sr?.stop(); } catch { /* */ }
+    if (r.current.mr?.state === 'recording') r.current.mr.stop();
+  };
+  useEffect(() => () => { r.current.want = false; try { r.current.sr?.abort(); } catch { /* */ } if (r.current.mr?.state === 'recording') r.current.mr.stop(); clearInterval(r.current.timer); }, []);
+  const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  const status = busy ? 'Розпізнаю…' : rec ? (serverOK && CAN_REC ? `Запис ${mmss} · натисни, щоб завершити` : 'Слухаю…') : '';
+  return { supported: CAN_REC || !!SR, rec, busy, interim, status, start, stop };
 }
 
 const ICON = { task: '📅', expense: '💸', income: '💰', habit: '✅', date: '🎂', fact: '🧠', debt_payment: '🏦', shift: '🚕' };
@@ -41,7 +91,7 @@ export default function Capture() {
   const [stage, setStage] = useState('input'); // input | parsing | drafts | saving
   const [items, setItems] = useState([]);
   const [comment, setComment] = useState('');
-  const sp = useSpeech((t) => setText((x) => (x ? x + ' ' : '') + t));
+  const sp = useSpeech((t) => setText((x) => (x ? x + ' ' : '') + t), (m) => s.flash(m, 'err'));
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -84,12 +134,12 @@ export default function Capture() {
         {(stage === 'input' || stage === 'parsing') && (
           <>
             {sp.supported && (
-              <button className={`cap-mic ${sp.rec ? 'rec' : ''}`} onClick={() => (sp.rec ? sp.stop() : sp.start())} aria-label="Мікрофон">
+              <button className={`cap-mic ${sp.rec ? 'rec' : ''}`} disabled={sp.busy} onClick={() => (sp.rec ? sp.stop() : sp.start())} aria-label="Мікрофон">
                 <Icon n="mic" />
               </button>
             )}
             <div className="muted" style={{ textAlign: 'center', marginBottom: 10 }}>
-              {sp.rec ? 'Слухаю… говори вільно' : sp.supported ? 'Натисни і говори, або пиши' : 'Голос недоступний у цьому браузері — пиши'}
+              {sp.status || (sp.supported ? 'Натисни і говори скільки треба, паузи не страшні' : 'Голос недоступний — пиши або мікрофон клавіатури')}
             </div>
             <textarea className="input" rows={4} value={text + (sp.interim ? (text ? ' ' : '') + sp.interim : '')} onChange={(e) => setText(e.target.value)}
               placeholder="Заправився на 1200, кава 60 готівкою, завтра о 10 деканат, помолився" />
@@ -97,7 +147,7 @@ export default function Capture() {
               {['Обід у їдальні 228', 'Зміна Уклон 1100, 5 год', 'Помолився і читав Біблію'].map((q) => (
                 <button key={q} className="qchip" onClick={() => setText((x) => (x ? x + ', ' : '') + q)}>{q}</button>))}
             </div>
-            <button className="btn pri block mt" style={{ height: 48 }} disabled={!text.trim() || stage === 'parsing'} onClick={parse}>
+            <button className="btn pri block mt" style={{ height: 48 }} disabled={!text.trim() || stage === 'parsing' || sp.rec || sp.busy} onClick={parse}>
               {stage === 'parsing' ? 'Розбираю…' : 'Розібрати'}
             </button>
           </>

@@ -23,7 +23,7 @@ export default function Claude({ go }) {
   const [spent, setSpent] = useState(0);
   const [iv, setIv] = useState(() => (window.location.hash.includes('interview') ? { transcript: [], q: null, options: [], done: false, loading: true } : null));
   const end = useRef(null);
-  const sp = useSpeech((t) => setText((x) => (x ? x + ' ' : '') + t));
+  const sp = useSpeech((t) => setText((x) => (x ? x + ' ' : '') + t), (m) => s.flash(m, 'err'));
 
   const load = async () => {
     const m0 = new Date(); m0.setDate(1); m0.setHours(0, 0, 0, 0);
@@ -132,11 +132,11 @@ export default function Claude({ go }) {
 
       {(!iv || (!iv.done && !iv.loading)) && (
         <div className="composer"><div className="in">
-          {sp.supported && <button className={`btn ${sp.rec ? 'pri' : ''}`} style={{ height: 44, width: 44, padding: 0 }} onClick={() => (sp.rec ? sp.stop() : sp.start())} aria-label="Голос"><Icon n="mic" size={20} /></button>}
-          <textarea className="input" rows={1} value={text + (sp.interim ? ' ' + sp.interim : '')} placeholder={iv ? 'Твоя відповідь…' : 'Запитай або порадься…'} onChange={(e) => setText(e.target.value)}
+          {sp.supported && <button className={`btn ${sp.rec ? 'pri' : ''}`} style={{ height: 44, width: 44, padding: 0, ...(sp.rec ? { background: 'var(--bad)', borderColor: 'var(--bad)' } : null) }} disabled={sp.busy} onClick={() => (sp.rec ? sp.stop() : sp.start())} aria-label="Голос"><Icon n="mic" size={20} /></button>}
+          <textarea className="input" rows={1} value={text + (sp.interim ? ' ' + sp.interim : '')} placeholder={sp.status || (iv ? 'Твоя відповідь…' : 'Запитай або порадься…')} onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 700) { e.preventDefault(); send(); } }} />
           {!iv && <button className={`btn sm ${deep ? 'pri' : ''}`} style={{ height: 44 }} onClick={() => setDeep(!deep)} title="Глибокий аналіз (дорожче)">{deep ? '🧠' : '⚡'}</button>}
-          <button className="btn pri" style={{ height: 44 }} disabled={busy || !text.trim()} onClick={() => send()}><Icon n="send" size={18} /></button>
+          <button className="btn pri" style={{ height: 44 }} disabled={busy || !text.trim() || sp.rec || sp.busy} onClick={() => send()}><Icon n="send" size={18} /></button>
         </div></div>
       )}
     </>
