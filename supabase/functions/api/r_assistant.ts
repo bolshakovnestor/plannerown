@@ -495,7 +495,7 @@ export default async function handler(req: Request): Promise<Response> {
       if (bin.length < 1000) return json({ text: "" });
       const mime = String(body.mime || "audio/webm").split(";")[0];
       const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : mime.includes("wav") ? "wav" : "webm";
-      const prompt = "Нестор диктує українською: витрати в гривнях, задачі, звички. Слова: Уклон, Моно, монобанк, Crédit Agricole, ІФЦем, деканат, mate.academy, ТТТ, АТБ, Сільпо, ОККО, WOG, молитва, Біблія, сповідь.";
+      const prompt = "Уклон, Моно, Crédit Agricole, ІФЦем, деканат, mate.academy, АТБ, Сільпо, ОККО, WOG, гривень.";
       let lastErr = "";
       for (const model of ["gpt-4o-transcribe", "whisper-1"]) {
         const fd = new FormData();
@@ -508,7 +508,11 @@ export default async function handler(req: Request): Promise<Response> {
         if (r.ok) {
           const secs = Math.max(1, Number(body.seconds) || bin.length / 4000);
           await db.from("ai_usage").insert({ user_id: uid, model, input_tokens: 0, output_tokens: 0, cost_usd: (secs / 60) * 0.006 });
-          return json({ text: String(j.text || "").trim(), model });
+          let text = String(j.text || "").trim();
+          // На тиші модель іноді повертає підказку — відкидаємо
+          const bare = text.replace(/[.,!?…\s]+$/u, "").toLowerCase();
+          if (!bare || prompt.toLowerCase().includes(bare)) text = "";
+          return json({ text, model });
         }
         lastErr = j?.error?.message || `HTTP ${r.status}`;
         if (r.status === 401 || r.status === 429) break;
