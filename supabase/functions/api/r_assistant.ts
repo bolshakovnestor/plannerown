@@ -506,7 +506,7 @@ export default async function handler(req: Request): Promise<Response> {
       if (body.action === "capture") {
         const out = await claude(db, uid, {
           model: MODEL_FAST, max_tokens: 2000, tool_choice: { type: "tool", name: "propose_items" }, tools: [PROPOSE_TOOL],
-          system: [{ type: "text", text: `Ти розбираєш надиктоване Нестором на записи для планера. Сьогодні ${localNow().date}. Відносні дати («завтра», «в четвер») переводь у YYYY-MM-DD. Витрати: сума в ₴, категорію і рахунок обирай з наявних назв (готівка за замовчуванням, якщо не сказано «карткою»). Задачам — сферу з наявних. «Помолився», «читав Біблію» тощо — type=habit з точною назвою звички. Стійкі відомості про себе («обід зазвичай 200») — type=fact. Платіж по кредиту — debt_payment. Зміна в таксі — shift (amount = чистими).` }, sysCtx],
+          system: [{ type: "text", text: `Ти розбираєш надиктоване Нестором на записи для планера. Сьогодні ${localNow().date}. Відносні дати («завтра», «в четвер») переводь у YYYY-MM-DD. Витрати: сума в ₴, категорію і рахунок обирай з наявних назв (готівка за замовчуванням; «карткою» — Моно біла, кредитну чорну — лише якщо так і сказано). Задачам — сферу з наявних. «Помолився», «читав Біблію» тощо — type=habit з точною назвою звички. Стійкі відомості про себе («обід зазвичай 200») — type=fact. Платіж по кредиту — debt_payment. Зміна в таксі — shift (amount = чистими).` }, sysCtx],
           messages: [{ role: "user", content: body.text || "" }],
         });
         const use = (out.content || []).find((c: any) => c.type === "tool_use");
