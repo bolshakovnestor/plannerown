@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import webpush from "npm:web-push@3.6.7";
-import { simulate, nextDue, livingCosts, commuteCost, liquidNow, cushionTargetUAH, ymLabel } from "./forecast.js";
+import { simulate, nextDue, livingCosts, commuteCost, liquidNow, cushionTargetUAH, ymLabel, whatIf, describeEffect, safeToSpend } from "./forecast.js";
 
 export const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -51,6 +51,8 @@ export async function monthSpendUSD(db: SupabaseClient, uid: string) {
 export async function claude(db: SupabaseClient, uid: string, body: Record<string, unknown>) {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) throw new Error("Немає ANTHROPIC_API_KEY у секретах Supabase");
+  // Моделі 5.5 думають за замовчуванням, і це з'їдає max_tokens. Haiku — без роздумів, Sonnet — мінімальні.
+  if (!body.thinking) body.thinking = String(body.model).includes("haiku") ? { type: "disabled" } : { type: "between_tools" };
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -92,11 +94,13 @@ export async function contextText(db: SupabaseClient, uid: string, st: State, op
   const in7 = new Date(now.date + "T12:00:00"); in7.setDate(in7.getDate() + 7);
   const in7s = in7.toISOString().slice(0, 10);
 
-  const [tx, tasks, hl] = await Promise.all([
+  const [tx, tasks, hl, facts, advice] = await Promise.all([
     db.from("transactions").select("amount,category_id,occurred_at,description").eq("user_id", uid).gte("occurred_at", monthStart),
     db.from("tasks").select("id,title,sphere_id,due_date,due_time,priority,status,notes").eq("user_id", uid).eq("status", "todo")
       .or(`due_date.lte.${in7s},due_date.is.null`).order("due_date", { nullsFirst: false }).limit(60),
     db.from("habit_logs").select("habit_id,day,value").eq("user_id", uid).gte("day", new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)),
+    db.from("ai_facts").select("id,kind,text,amount,confirmed_at").eq("user_id", uid).eq("active", true).order("kind"),
+    db.from("ai_advice").select("title,status,reason,monthly_effect").eq("user_id", uid).order("created_at", { ascending: false }).limit(25),
   ]);
 
   const catName = (id: string) => st.categories.find((c) => c.id === id)?.name || "Без категорії";
@@ -134,6 +138,10 @@ export async function contextText(db: SupabaseClient, uid: string, st: State, op
     `- старт ${fmt(sim.startCash)} ₴; подушка ${fmt(sim.target)} ₴ досягається: ${sim.cushionYM ? ymLabel(sim.cushionYM) : "не в межах 24 міс"}; ліміт закрито: ${sim.creditLineFreeYM ? ymLabel(sim.creditLineFreeYM) : "—"}; усі борги: ${sim.debtFreeYM ? ymLabel(sim.debtFreeYM) : "пізніше 24 міс"}; відсотки ${fmt(sim.interestTotal)} + комісії конвертації ${fmt(sim.feeTotal)} ₴`,
     ...(sim.warnings.length ? [`- ПОПЕРЕДЖЕННЯ: ${sim.warnings.join("; ")}`] : []),
     ...sim.rows.slice(0, 6).map((r) => `- ${r.label}: дохід ${fmt(r.income)}, життя ${fmt(r.living)}${r.oneTime ? `, разово ${fmt(r.oneTime)}` : ""}, обов'язкові ${fmt(r.oblig)}, вільно ${fmt(r.free)}, достроково ${fmt(r.prepaid)}, кеш ${fmt(r.cash)}, борг ${fmt(r.totalDebt)}`),
+    `\nПАМ'ЯТЬ (факти про Нестора; [id] для update_fact/forget_fact; rejected — НЕ пропонувати знову):`,
+    ...((facts.data || []).length ? (facts.data || []).map((f) => `- [${f.id}] ${f.kind}: ${f.text}${f.amount ? ` (${f.amount} ₴)` : ""} · підтверджено ${String(f.confirmed_at).slice(0, 10)}`) : ["- поки порожньо — варто запропонувати знайомство"]),
+    `\nПОРАДИ, ЩО ВЖЕ БУЛИ: ${(advice.data || []).map((a) => `«${a.title}» → ${a.status}${a.reason ? ` (${a.reason})` : ""}`).join("; ") || "немає"}`,
+    `УКЛОН: ~${fmt(Number(p.avg_shift_net))} ₴ чистими за зміну ≈ ${fmt(Number(p.avg_shift_net) / Number(p.avg_shift_hours || 4.7))} ₴/год`,
     `\nСФЕРИ: ${st.spheres.map((s) => s.name).join(", ")}`,
     `КАТЕГОРІЇ: ${st.categories.map((c) => `${c.name} (${c.kind})`).join(", ")}`,
     `\nЗАДАЧІ (відкриті, до +7 днів і без дати):`,
@@ -236,4 +244,4 @@ export async function monoClientInfo(db: SupabaseClient, uid: string) {
   return info;
 }
 
-export { simulate, livingCosts, ymLabel, nextDue };
+export { simulate, livingCosts, ymLabel, nextDue, whatIf, describeEffect, safeToSpend };

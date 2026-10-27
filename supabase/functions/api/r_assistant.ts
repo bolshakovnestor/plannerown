@@ -1,6 +1,6 @@
 import {
   admin, cors, json, userFromReq, loadState, contextText, claude, monthSpendUSD, PERSONA,
-  MODEL_FAST, MODEL_DEEP, localNow, sendPush, monoClientInfo, cfg, type State,
+  MODEL_FAST, MODEL_DEEP, localNow, sendPush, monoClientInfo, cfg, whatIf, describeEffect, type State,
 } from "./_shared/core.ts";
 
 const MONEY_TOOLS = new Set([
@@ -9,6 +9,35 @@ const MONEY_TOOLS = new Set([
 ]);
 
 const TOOLS = [
+  // ---- пам'ять ----
+  { name: "remember_fact", description: "Запам'ятати стійкий факт про Нестора: звичку витрат, розклад, обмеження, вподобання, відхилену пораду (kind=rejected з причиною), дохід. Одне речення. Не дублюй наявні — онови їх через update_fact.",
+    input_schema: { type: "object", properties: {
+      kind: { type: "string", enum: ["spending", "schedule", "habit", "constraint", "preference", "rejected", "goal", "income", "other"] },
+      text: { type: "string" }, amount: { type: "number", description: "₴, якщо факт має суму (на день/раз/міс — вкажи в тексті)" } }, required: ["kind", "text"] } },
+  { name: "update_fact", description: "Оновити факт за [id] з ПАМ'ЯТІ (виправлення застарілих даних) або підтвердити його актуальність (confirm=true).",
+    input_schema: { type: "object", properties: { id: { type: "string" }, text: { type: "string" }, amount: { type: "number" }, kind: { type: "string" }, confirm: { type: "boolean" } }, required: ["id"] } },
+  { name: "forget_fact", description: "Видалити факт за [id].", input_schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+  // ---- розрахунки ----
+  { name: "what_if", description: "ОБОВ'ЯЗКОВО для будь-якого твердження про вплив на цілі. Порахувати сценарій проти бази фінансовим рушієм: щомісячна зміна доходу/витрат, разова покупка, перенесення з'їзду, додаткові зміни Уклону. Повертає зсуви дат цілей і різницю через рік.",
+    input_schema: { type: "object", properties: {
+      label: { type: "string" },
+      extra_income_monthly: { type: "number", description: "+₴/міс чистого доходу (після витрат на нього)" },
+      extra_expense_monthly: { type: "number", description: "+₴/міс нових витрат; економія — від'ємне число" },
+      from_date: { type: "string", description: "з якої дати діє щомісячна зміна" },
+      one_time_amount: { type: "number", description: "разова витрата ₴ (дохід — від'ємне)" }, one_time_date: { type: "string" },
+      move_date: { type: "string" }, extra_shifts: { type: "number", description: "додаткових змін Уклону на місяць" } } } },
+  { name: "suggest_advice", description: "Створити картку-пораду з кнопками «Беру / Не підходить». Ефект рахує код. Конкретна дія з цифрою, без загальників. Не повторюй відхилені.",
+    input_schema: { type: "object", properties: {
+      title: { type: "string", description: "коротко: «Обід з дому замість їдальні»" },
+      detail: { type: "string", description: "1–2 речення: як саме і скільки коштує альтернатива" },
+      monthly_effect: { type: "number", description: "₴/міс на користь: економія або додатковий дохід (додатне)" },
+      one_time: { type: "number", description: "разова економія/дохід ₴ (додатне)" },
+      action_type: { type: "string", enum: ["habit", "budget", "task", "none"], description: "що створити, якщо «Беру»" },
+      action_name: { type: "string", description: "назва звички або задачі" },
+      action_category: { type: "string", description: "категорія для зміни бюджету" },
+      action_budget: { type: "number", description: "новий місячний бюджет категорії" },
+      action_date: { type: "string" } }, required: ["title", "monthly_effect"] } },
+
   { name: "create_task", description: "Створити задачу в планері. Дата YYYY-MM-DD, час HH:MM. Сфера — одна з наявних.",
     input_schema: { type: "object", properties: {
       title: { type: "string" }, sphere: { type: "string" }, due_date: { type: "string" }, due_time: { type: "string" },
@@ -67,6 +96,21 @@ const TOOLS = [
   { name: "set_category_budget", description: "Змінити місячний бюджет категорії.", input_schema: { type: "object", properties: {
       category: { type: "string" }, monthly_budget: { type: "number" } }, required: ["category", "monthly_budget"] } },
 ];
+
+
+const ASK_TOOL = { name: "ask_user", description: "Поставити Несторові ОДНЕ наступне питання знайомства з 2–4 короткими варіантами відповіді. Або завершити (done=true), коли основне зібрано.",
+  input_schema: { type: "object", properties: { question: { type: "string" }, options: { type: "array", items: { type: "string" } }, done: { type: "boolean" }, summary: { type: "string", description: "якщо done — 2–3 рядки підсумку і перша порада" } }, required: ["question"] } };
+
+const ITEM_PROPS = {
+  type: { type: "string", enum: ["task", "expense", "income", "habit", "date", "fact", "debt_payment", "shift"] },
+  title: { type: "string", description: "задача/дата/опис витрати" }, amount: { type: "number" },
+  category: { type: "string" }, account: { type: "string" }, date: { type: "string", description: "YYYY-MM-DD" }, time: { type: "string", description: "HH:MM" },
+  sphere: { type: "string" }, priority: { type: "integer" }, notes: { type: "string" }, recurrence: { type: "string" },
+  habit: { type: "string" }, debt: { type: "string" }, debt_effect: { type: "string", enum: ["scheduled", "prepay"] },
+  fact_kind: { type: "string" }, hours: { type: "number" }, km: { type: "number" },
+};
+const PROPOSE_TOOL = { name: "propose_items", description: "Розкласти сказане на окремі записи-чернетки. Нічого не вигадувати: лише те, що сказано. Невідоме поле — пропусти.",
+  input_schema: { type: "object", properties: { items: { type: "array", items: { type: "object", properties: ITEM_PROPS, required: ["type"] } }, comment: { type: "string", description: "1 рядок, якщо щось незрозуміло" } }, required: ["items"] } };
 
 const norm = (s: string) => (s || "").toLowerCase().replace(/[«»"'’`]/g, "").trim();
 function find<T extends { name: string }>(list: T[], name?: string): T | undefined {
@@ -128,6 +172,23 @@ async function runImmediate(db: any, uid: string, st: State, name: string, a: an
   if (name === "add_important_date") {
     const { data } = await db.from("important_dates").insert({ user_id: uid, title: a.title, date: a.date, yearly: a.yearly ?? true, remind_days: a.remind_days ?? 7 }).select("id").single();
     return { text: `Дата додана: ${a.title} ${a.date}`, undo: [{ table: "important_dates", op: "insert", id: data.id }] };
+  }
+  if (name === "remember_fact") {
+    const { data, error } = await db.from("ai_facts").insert({ user_id: uid, kind: a.kind || "other", text: a.text, amount: a.amount ?? null }).select("id").single();
+    if (error) throw error;
+    return { text: `Запам'ятав: ${a.text}`, undo: [{ table: "ai_facts", op: "insert", id: data.id }] };
+  }
+  if (name === "update_fact" || name === "forget_fact") {
+    const { data: before } = await db.from("ai_facts").select("*").eq("id", a.id).eq("user_id", uid).maybeSingle();
+    if (!before) throw new Error("Факт не знайдено");
+    if (name === "forget_fact") {
+      await db.from("ai_facts").delete().eq("id", a.id);
+      return { text: `Забув: ${before.text}`, undo: [{ table: "ai_facts", op: "delete", row: before }] };
+    }
+    const patch: Record<string, unknown> = { confirmed_at: new Date().toISOString() };
+    if (a.text) patch.text = a.text; if (a.amount !== undefined) patch.amount = a.amount; if (a.kind) patch.kind = a.kind;
+    await db.from("ai_facts").update(patch).eq("id", a.id);
+    return { text: a.text ? `Оновив: ${a.text}` : `Підтверджено: ${before.text}`, undo: [{ table: "ai_facts", op: "update", id: a.id, before: Object.fromEntries(Object.keys(patch).map((k) => [k, before[k]])) }] };
   }
   throw new Error("Невідомий інструмент " + name);
 }
@@ -286,6 +347,97 @@ async function revert(db: any, uid: string, ops: Op[]) {
   }
 }
 
+
+const RULES = `
+ПРАВИЛА:
+- Грошові зміни (транзакції, борги, параметри, потоки, цілі, бюджети) — пропозиції: застосуються після «Застосувати». Задачі, звички, пам'ять — одразу.
+- Будь-яке «це наблизить/віддалить ціль на…» — лише після what_if, цифри бери з його результату.
+- Ідеї економії чи заробітку оформлюй через suggest_advice (з конкретною альтернативою і ціною). Перевір ПОРАДИ, ЩО ВЖЕ БУЛИ, і rejected-факти — не повторюй.
+- Підробіток/ідея: порахуй реальну ставку ₴/год (дохід мінус витрати, поділити на години, включно з дорогою) і порівняй з Уклоном; потім what_if; вердикт: варто / ні / варто за умови X; запропонуй критерій зупинки.
+- Якщо Нестор виправляє дані чи каже, що порада безглузда — одразу update_fact/remember_fact (kind=rejected з причиною) і подякуй одним словом, без виправдань.
+- Нові стійкі факти з розмови (звички, ціни, розклад) — remember_fact.
+- Факт із датою підтвердження старше 30 днів, що стосується теми, — уточни, чи актуальний.`;
+
+const INTERVIEW = `РЕЖИМ ЗНАЙОМСТВА. Мета — за 10–14 питань зрозуміти, куди йдуть гроші й час, щоб давати точні поради.
+Теми (по черзі, пропускай те, що вже є в ПАМ'ЯТІ): обід у будні (де, скільки, перекуси), вечері й продукти (де купує, скільки на тиждень), кава/снеки/енергетики, дорога і пальне поза роботою, підписки (які, скільки), Уклон (дні, години, скільки виходить, що заважає), зустрічі з нареченою (як часто, типові витрати), спорт/сон/енергія, плановані покупки на 3 міс, що не обговорюється (на чому не економимо), додаткові навички для заробітку.
+Кожен хід: збережи нові факти з останньої відповіді (remember_fact, з сумою в amount, якщо є), потім ask_user: одне коротке питання + 2–4 варіанти-підказки (типові відповіді з сумами). Без коментарів текстом. Коли теми покрито — ask_user з done=true і summary: 2–3 рядки, що зрозумів, і найбільша можливість зекономити/заробити з оцінкою ₴/міс.`;
+
+function calcWhatIf(st: State, a: any) {
+  const input = { params: st.params, debts: st.debts, streams: st.streams, categories: st.categories, goals: st.goals, accounts: st.accounts };
+  return whatIf(input, {
+    extraIncome: a.extra_income_monthly, extraExpense: a.extra_expense_monthly, from: a.from_date,
+    oneTime: a.one_time_amount ? { amount: a.one_time_amount, date: a.one_time_date } : undefined,
+    moveDate: a.move_date, extraShifts: a.extra_shifts,
+  });
+}
+
+function itemToTool(it: any): { tool: string; args: any } {
+  switch (it.type) {
+    case "task": return { tool: "create_task", args: { title: it.title, sphere: it.sphere, due_date: it.date, due_time: it.time, priority: it.priority, notes: it.notes, recurrence: it.recurrence } };
+    case "expense": case "income": return { tool: "add_transaction", args: { amount: Math.abs(+it.amount), kind: it.type, category: it.category, account: it.account, date: it.date, description: it.title } };
+    case "debt_payment": return { tool: "add_transaction", args: { amount: Math.abs(+it.amount), kind: "expense", debt: it.debt, debt_effect: it.debt_effect || "scheduled", account: it.account, date: it.date, description: it.title || "Платіж по кредиту" } };
+    case "habit": return { tool: "log_habit", args: { habit: it.habit || it.title, day: it.date } };
+    case "date": return { tool: "add_important_date", args: { title: it.title, date: it.date, yearly: it.recurrence === "yearly" || undefined } };
+    case "fact": return { tool: "remember_fact", args: { kind: it.fact_kind || "other", text: it.title || it.notes, amount: it.amount } };
+    case "shift": return { tool: "add_uklon_shift", args: { day: it.date, net: +it.amount, hours: it.hours, km: it.km, notes: it.notes } };
+  }
+  throw new Error("Невідомий тип " + it.type);
+}
+
+async function runAgent(db: any, uid: string, st: State, o: { model: string; maxTokens: number; system: any[]; tools: any[]; messages: any[]; stopOn: string | null }) {
+  const applied: any[] = [], proposals: any[] = [], advice: any[] = [];
+  let finalText = "", ask: any = null;
+  const messages = o.messages;
+  for (let i = 0; i < 7; i++) {
+    const out = await claude(db, uid, { model: o.model, max_tokens: o.maxTokens, system: o.system, tools: o.tools, messages });
+    messages.push({ role: "assistant", content: out.content });
+    const uses = (out.content || []).filter((c: any) => c.type === "tool_use");
+    finalText = (out.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim() || finalText;
+    if (!uses.length || out.stop_reason !== "tool_use") break;
+    const results = [];
+    for (const u of uses) {
+      try {
+        if (u.name === "ask_user") { ask = u.input; results.push({ type: "tool_result", tool_use_id: u.id, content: "ok" }); continue; }
+        if (u.name === "what_if") {
+          const w = calcWhatIf(st, u.input);
+          results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ опис: describeEffect(w), ...w }) });
+          continue;
+        }
+        if (u.name === "suggest_advice") {
+          const a = u.input;
+          const w = calcWhatIf(st, { extra_income_monthly: +a.monthly_effect || 0, one_time_amount: a.one_time ? -a.one_time : 0 });
+          const effectText = describeEffect(w);
+          const { data } = await db.from("ai_advice").insert({
+            user_id: uid, title: a.title, detail: a.detail || null, monthly_effect: +a.monthly_effect || 0, one_time: +a.one_time || 0,
+            effect: { text: effectText, shift: w.shift, cash12: w.cash12, debt12: w.debt12 },
+            action: { type: a.action_type || "none", name: a.action_name, category: a.action_category, budget: a.action_budget, date: a.action_date },
+          }).select("*").single();
+          advice.push(data);
+          results.push({ type: "tool_result", tool_use_id: u.id, content: "Картка створена. Ефект: " + effectText });
+          continue;
+        }
+        if (MONEY_TOOLS.has(u.name)) {
+          const pv = previewMoney(st, u.name, u.input);
+          if (pv.error) throw new Error(pv.error);
+          const { data } = await db.from("ai_actions").insert({ user_id: uid, tool: u.name, args: u.input, preview: pv.lines, needs_confirm: true }).select("id").single();
+          proposals.push({ id: data!.id, tool: u.name, preview: pv.lines });
+          results.push({ type: "tool_result", tool_use_id: u.id, content: "Запропоновано, чекає підтвердження: " + pv.lines.join("; ") });
+        } else {
+          const r = await runImmediate(db, uid, st, u.name, u.input);
+          const { data } = await db.from("ai_actions").insert({ user_id: uid, tool: u.name, args: u.input, preview: [r.text], undo: r.undo, status: "applied" }).select("id").single();
+          applied.push({ id: data!.id, tool: u.name, text: r.text });
+          results.push({ type: "tool_result", tool_use_id: u.id, content: "Готово: " + r.text });
+        }
+      } catch (e) {
+        results.push({ type: "tool_result", tool_use_id: u.id, content: "Помилка: " + (e as Error).message, is_error: true });
+      }
+    }
+    messages.push({ role: "user", content: results });
+    if (o.stopOn && ask) break;
+  }
+  return { finalText, applied, proposals, advice, ask };
+}
+
 // ---------- Handler ----------
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -341,61 +493,114 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ ok: true, sent: n });
     }
 
-    if (body.action === "chat") {
+    if (["chat", "interview", "advice_generate", "capture"].includes(body.action)) {
       const st = await loadState(db, uid);
       const budget = Number(st.params?.ai_budget_usd || 5);
       const spent = await monthSpendUSD(db, uid);
       if (spent >= budget) return json({ error: `Ліміт AI на місяць вичерпано ($${spent.toFixed(2)} з $${budget}). Підніми в налаштуваннях.` }, 402);
-
-      const deep = !!body.deep || spent < budget * 0.8 && /аналіз|проаналізуй|стратег|огляд/i.test(body.message || "");
-      const model = deep ? MODEL_DEEP : MODEL_FAST;
-      const userText = body.mode === "inbox"
-        ? `ІНБОКС (розклади на задачі, витрати, звички, дати; задачам постав сферу і дату, якщо вона випливає з тексту; відповідь — 1–3 рядки):\n${body.message}`
-        : body.message;
-      await db.from("ai_messages").insert({ user_id: uid, role: "user", content: body.mode === "inbox" ? `📥 ${body.message}` : body.message });
-
-      const { data: hist } = await db.from("ai_messages").select("role,content").eq("user_id", uid).in("role", ["user", "assistant"])
-        .order("created_at", { ascending: false }).limit(9);
-      const history = (hist || []).reverse().slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
       const ctx = await contextText(db, uid, st);
-      const system = [
-        { type: "text", text: PERSONA + "\nГрошові зміни (транзакції, борги, параметри, потоки, цілі, бюджети) — це пропозиції: вони застосуються лише після того, як Нестор натисне «Застосувати». Задачі й звички змінюються одразу.\nЯкщо потрібна інформація, якої немає — коротко запитай." },
-        { type: "text", text: "КОНТЕКСТ:\n" + ctx },
-      ];
-      const messages: any[] = [...history, { role: "user", content: userText }];
-      const applied: any[] = [], proposals: any[] = [];
-      let finalText = "";
-      for (let i = 0; i < 6; i++) {
-        const out = await claude(db, uid, { model, max_tokens: deep ? 2500 : 1200, system, tools: TOOLS, messages });
-        messages.push({ role: "assistant", content: out.content });
-        const uses = (out.content || []).filter((c: any) => c.type === "tool_use");
-        finalText = (out.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim() || finalText;
-        if (!uses.length || out.stop_reason !== "tool_use") break;
-        const results = [];
-        for (const u of uses) {
-          try {
-            if (MONEY_TOOLS.has(u.name)) {
-              const pv = previewMoney(st, u.name, u.input);
-              if (pv.error) throw new Error(pv.error);
-              const { data } = await db.from("ai_actions").insert({ user_id: uid, tool: u.name, args: u.input, preview: pv.lines, needs_confirm: true }).select("id").single();
-              proposals.push({ id: data!.id, tool: u.name, preview: pv.lines });
-              results.push({ type: "tool_result", tool_use_id: u.id, content: "Запропоновано, чекає підтвердження: " + pv.lines.join("; ") });
-            } else {
-              const r = await runImmediate(db, uid, st, u.name, u.input);
-              const { data } = await db.from("ai_actions").insert({ user_id: uid, tool: u.name, args: u.input, preview: [r.text], undo: r.undo, status: "applied" }).select("id").single();
-              applied.push({ id: data!.id, tool: u.name, text: r.text });
-              results.push({ type: "tool_result", tool_use_id: u.id, content: "Готово: " + r.text });
-            }
-          } catch (e) {
-            results.push({ type: "tool_result", tool_use_id: u.id, content: "Помилка: " + (e as Error).message, is_error: true });
-          }
-        }
-        messages.push({ role: "user", content: results });
+      const sysBase = { type: "text", text: PERSONA + RULES };
+      const sysCtx = { type: "text", text: "КОНТЕКСТ:\n" + ctx };
+
+      // --- Голос/текст → чернетки (нічого не записує) ---
+      if (body.action === "capture") {
+        const out = await claude(db, uid, {
+          model: MODEL_FAST, max_tokens: 2000, tool_choice: { type: "tool", name: "propose_items" }, tools: [PROPOSE_TOOL],
+          system: [{ type: "text", text: `Ти розбираєш надиктоване Нестором на записи для планера. Сьогодні ${localNow().date}. Відносні дати («завтра», «в четвер») переводь у YYYY-MM-DD. Витрати: сума в ₴, категорію і рахунок обирай з наявних назв (готівка за замовчуванням, якщо не сказано «карткою»). Задачам — сферу з наявних. «Помолився», «читав Біблію» тощо — type=habit з точною назвою звички. Стійкі відомості про себе («обід зазвичай 200») — type=fact. Платіж по кредиту — debt_payment. Зміна в таксі — shift (amount = чистими).` }, sysCtx],
+          messages: [{ role: "user", content: body.text || "" }],
+        });
+        const use = (out.content || []).find((c: any) => c.type === "tool_use");
+        return json({ items: use?.input?.items || [], comment: use?.input?.comment || "" });
       }
-      if (!finalText) finalText = proposals.length ? "Перевір зміни нижче і застосуй." : "Готово.";
-      await db.from("ai_messages").insert({ user_id: uid, role: "assistant", content: finalText });
-      return json({ reply: finalText, applied, proposals, model, spentUSD: await monthSpendUSD(db, uid) });
+
+      let model = MODEL_FAST, maxTokens = 1500;
+      let messages: any[] = [];
+      let tools: any[] = TOOLS;
+      let system: any[] = [sysBase, sysCtx];
+
+      if (body.action === "chat") {
+        const deep = !!body.deep || (spent < budget * 0.8 && /аналіз|проаналізуй|стратег|огляд|чи варто|порадь/i.test(body.message || ""));
+        model = deep ? MODEL_DEEP : MODEL_FAST; maxTokens = deep ? 5000 : 1800;
+        await db.from("ai_messages").insert({ user_id: uid, role: "user", content: body.message });
+        const { data: hist } = await db.from("ai_messages").select("role,content").eq("user_id", uid).in("role", ["user", "assistant"])
+          .order("created_at", { ascending: false }).limit(11);
+        messages = (hist || []).reverse().slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
+        messages.push({ role: "user", content: body.message });
+      } else if (body.action === "advice_generate") {
+        messages = [{ role: "user", content: `Дай ${body.count || 2} нові конкретні поради через suggest_advice (економія або заробіток), спираючись на ПАМ'ЯТЬ і бюджет місяця. Перед цим перевір ефект через what_if. Не повторюй ті, що вже були. Текстом — нічого, крім одного рядка.` }];
+      } else {
+        // інтерв'ю: клієнт присилає транскрипт [{q, a}]
+        tools = [...TOOLS.filter((t) => ["remember_fact", "update_fact"].includes(t.name)), ASK_TOOL];
+        system = [sysBase, { type: "text", text: INTERVIEW }, sysCtx];
+        const tr: { q: string; a: string }[] = body.transcript || [];
+        messages = [{ role: "user", content: "Почнімо знайомство." }];
+        for (const x of tr) { messages.push({ role: "assistant", content: x.q }); messages.push({ role: "user", content: x.a }); }
+        if (tr.length) messages[messages.length - 1].content += "\n\n(Збережи факти з цієї відповіді через remember_fact, далі — ask_user.)";
+      }
+
+      const r = await runAgent(db, uid, st, { model, maxTokens, system, tools, messages, stopOn: body.action === "interview" ? "ask_user" : null });
+
+      if (body.action === "interview") {
+        if (r.ask?.done) await db.from("params").update({ interview_done: true }).eq("user_id", uid);
+        return json({ question: r.ask?.question || r.finalText || "Розкажи ще щось про свої витрати?", options: r.ask?.options || [], done: !!r.ask?.done, summary: r.ask?.summary || "", saved: r.applied.map((x: any) => x.text) });
+      }
+      if (body.action === "chat") {
+        const text = r.finalText || (r.proposals.length ? "Перевір зміни нижче і застосуй." : r.advice.length ? "Подивись поради нижче." : "Готово.");
+        await db.from("ai_messages").insert({ user_id: uid, role: "assistant", content: text });
+        return json({ reply: text, applied: r.applied, proposals: r.proposals, advice: r.advice, model, spentUSD: await monthSpendUSD(db, uid) });
+      }
+      return json({ advice: r.advice, text: r.finalText });
     }
+
+    if (body.action === "commit") {
+      // Чернетки, які Нестор перевірив і відредагував → записуємо, кожну з undo
+      const st = await loadState(db, uid);
+      const done: any[] = [], failed: any[] = [];
+      for (const it of body.items || []) {
+        try {
+          const { tool, args } = itemToTool(it);
+          let undo: Op[], text: string;
+          if (MONEY_TOOLS.has(tool)) { undo = await applyMoney(db, uid, st, tool, args); text = previewMoney(st, tool, args).lines[0] || tool; }
+          else { const x = await runImmediate(db, uid, st, tool, args); undo = x.undo; text = x.text; }
+          const { data } = await db.from("ai_actions").insert({ user_id: uid, tool, args, preview: [text], undo, status: "applied" }).select("id").single();
+          done.push({ id: data!.id, text });
+        } catch (e) { failed.push({ item: it, error: (e as Error).message }); }
+      }
+      if (body.source_text) {
+        await db.from("ai_messages").insert({ user_id: uid, role: "user", content: `🎙 ${body.source_text}` });
+        await db.from("ai_messages").insert({ user_id: uid, role: "assistant", content: `Внесено: ${done.map((d) => d.text).join("; ") || "нічого"}${failed.length ? `\nНе вдалось: ${failed.map((f) => f.error).join("; ")}` : ""}` });
+      }
+      return json({ done, failed });
+    }
+
+    if (body.action === "advice_accept" || body.action === "advice_reject") {
+      const { data: adv } = await db.from("ai_advice").select("*").eq("id", body.id).eq("user_id", uid).maybeSingle();
+      if (!adv) return json({ error: "Пораду не знайдено" }, 404);
+      if (body.action === "advice_reject") {
+        await db.from("ai_advice").update({ status: "rejected", reason: body.reason || null }).eq("id", adv.id);
+        await db.from("ai_facts").insert({ user_id: uid, kind: "rejected", text: `Не пропонувати: «${adv.title}»${body.reason ? ` — ${body.reason}` : ""}` });
+        return json({ ok: true });
+      }
+      const st = await loadState(db, uid);
+      const a = adv.action || {};
+      let text = "Прийнято";
+      if (a.type === "habit" && a.name) text = (await runImmediate(db, uid, st, "create_habit", { name: a.name })).text;
+      else if (a.type === "task" && a.name) text = (await runImmediate(db, uid, st, "create_task", { title: a.name, due_date: a.date || localNow().date })).text;
+      else if (a.type === "budget" && a.category && a.budget !== undefined) {
+        const c = find(st.categories, a.category);
+        if (c) { await db.from("categories").update({ monthly_budget: a.budget }).eq("id", c.id); text = `Бюджет «${c.name}»: ${c.monthly_budget} → ${a.budget}`; }
+      }
+      await db.from("ai_advice").update({ status: "accepted" }).eq("id", adv.id);
+      await db.from("ai_facts").insert({ user_id: uid, kind: "habit", text: `Взяв у роботу: ${adv.title}` });
+      return json({ ok: true, text });
+    }
+
+    if (body.action === "what_if") {
+      const st = await loadState(db, uid);
+      const w = calcWhatIf(st, body);
+      return json({ ...w, text: describeEffect(w) });
+    }
+
     return json({ error: "Невідома дія" }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

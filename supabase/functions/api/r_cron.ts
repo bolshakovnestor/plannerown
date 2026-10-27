@@ -25,7 +25,7 @@ async function brief(db: any, uid: string, weekly: boolean) {
     return { title: weekly ? "Огляд тижня" : "Бриф", text: "Ліміт AI на місяць вичерпано — бриф без Claude. Відкрий «Сьогодні»." };
   }
   const out = await claude(db, uid, {
-    model: useDeep ? MODEL_DEEP : MODEL_FAST, max_tokens: weekly ? 1800 : 700,
+    model: useDeep ? MODEL_DEEP : MODEL_FAST, max_tokens: weekly ? 6000 : 1500,
     system: PERSONA + "\n\nКОНТЕКСТ:\n" + ctx,
     messages: [{ role: "user", content: task }],
   });
@@ -59,6 +59,28 @@ export default async function handler(req: Request): Promise<Response> {
       log.push("brief " + (weekly ? "weekly" : "daily"));
     }
   } catch (e) { log.push("brief error: " + (e as Error).message); }
+
+  const off = (new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv", timeZoneName: "longOffset" }).match(/GMT([+-]\d\d:\d\d)/) || [, "+02:00"])[1];
+  // 1b) Нагадування: 13:00 — задачі, 21:30 — внести витрати
+  try {
+    if (now.time >= "13:00" && now.time < "14:00" && p.last_noon_reminder !== now.date) {
+      await db.from("params").update({ last_noon_reminder: now.date }).eq("user_id", uid);
+      const { data: open } = await db.from("tasks").select("title").eq("user_id", uid).eq("status", "todo").lte("due_date", now.date).order("priority").limit(5);
+      const { count: doneToday } = await db.from("tasks").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("status", "done").gte("completed_at", `${now.date}T00:00:00${off}`);
+      if ((open || []).length && !doneToday) {
+        await sendPush(db, uid, `Задач на сьогодні: ${(open || []).length}`, `Як просувається «${open![0].title}»? Відміть або перенеси.`, "./#today");
+        log.push("noon reminder");
+      }
+    }
+    if (now.time >= "21:30" && p.last_eve_reminder !== now.date) {
+      await db.from("params").update({ last_eve_reminder: now.date }).eq("user_id", uid);
+      const { count } = await db.from("transactions").select("id", { count: "exact", head: true }).eq("user_id", uid).neq("source", "mono").gte("occurred_at", `${now.date}T00:00:00${off}`);
+      if (!count) {
+        await sendPush(db, uid, "Внеси витрати за день", "Готівка, Уклон, кава — 15 секунд голосом 🎙", "./#capture");
+        log.push("evening reminder");
+      }
+    }
+  } catch (e) { log.push("reminder error: " + (e as Error).message); }
 
   // 2) Нагадування про важливі дати (раз на день, разом з брифом)
   try {
