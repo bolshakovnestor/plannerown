@@ -198,13 +198,13 @@ export function categorize(item: { description?: string; mcc?: number; amount: n
   const d = (item.description || "").toLowerCase();
   const by = (n: string) => cats.find((c) => c.name === n)?.id || null;
   if (/погашення|розстрочк|кредит/.test(d)) return by("Погашення боргів");
-  if (/^(з|на) (чорн|біл|зелен|рожев|валютн|фіолет)|bolshakov|большаков|між своїми|банка/.test(d)) return by("Перекази між своїми");
+  if (/^(з|на) (чорн|біл|зелен|рожев|валютн|фіолет)|bolshakov|большаков|між своїми|банк[аиу] «|поповнення «|^переказ на картку$|міграці/.test(d)) return by("Перекази між своїми");
   if (item.amount > 0) {
     if (/uklon|уклон/.test(d)) return by("Уклон");
     if (/цемент|cement|зарплат/.test(d)) return by("Зарплата");
     return by("Інший дохід");
   }
-  if (/uklon|уклон/.test(d)) return by("Перекуси й кава в Уклоні");
+  if (/uklon|уклон/.test(d)) return by("Уклон: комісія/баланс") || by("Інше");
   const m = Number(item.mcc);
   const c = cats.find((c) => (c.mcc_codes || []).includes(m));
   return c?.id || by("Інше");
