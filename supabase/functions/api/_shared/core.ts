@@ -197,6 +197,7 @@ export async function sendPush(db: SupabaseClient, uid: string, title: string, b
 export function categorize(item: { description?: string; mcc?: number; amount: number }, cats: State["categories"]) {
   const d = (item.description || "").toLowerCase();
   const by = (n: string) => cats.find((c) => c.name === n)?.id || null;
+  if (/розстрочк|кредит/.test(d) && item.amount > 0) return by("Перекази між своїми"); // гроші кредиту на картку — не дохід
   if (/погашення|розстрочк|кредит/.test(d)) return by("Погашення боргів");
   if (/^(з|на) (чорн|біл|зелен|рожев|валютн|фіолет)|bolshakov|большаков|між своїми|банк[аиу] «|поповнення «|^переказ на картку$|міграці/.test(d)) return by("Перекази між своїми");
   if (item.amount > 0) {
@@ -230,15 +231,32 @@ export async function monoClientInfo(db: SupabaseClient, uid: string) {
   if (!res.ok) throw new Error(`Monobank ${res.status}: ${await res.text()}`);
   const info = await res.json();
   const st = await loadState(db, uid);
-  for (const a of info.accounts || []) {
-    const last4 = String((a.maskedPan || [""])[0]).slice(-4);
-    const acc = st.accounts.find((x) => x.mono_account_id === a.id || x.mono_account_id === `pan:${last4}`);
-    if (!acc) continue;
-    await db.from("accounts").update({ mono_account_id: a.id, balance: a.balance / 100, credit_limit: a.creditLimit ? a.creditLimit / 100 : null }).eq("id", acc.id);
-    if (acc.kind === "credit_card" && a.creditLimit) {
-      const used = Math.max(0, (a.creditLimit - a.balance) / 100);
-      await db.from("debts").update({ balance: used, credit_limit: a.creditLimit / 100 }).eq("user_id", uid).eq("kind", "credit_line").eq("lender", "monobank");
+  const accs = info.accounts || [];
+  const newIds: string[] = [];
+  // Моно після міграції рахунку видає новий id — тоді шукаємо картку за типом/валютою/останніми цифрами
+  const pick = (x: any) => {
+    const byId = accs.find((a: any) => a.id === x.mono_account_id);
+    if (byId) return byId;
+    const last4 = String(x.mono_account_id || "").startsWith("pan:") ? x.mono_account_id.slice(4) : null;
+    if (last4) { const m = accs.find((a: any) => String((a.maskedPan || [""])[0]).endsWith(last4)); if (m) return m; }
+    const n = String(x.name || "").toLowerCase();
+    const cur = x.currency === "USD" ? 840 : 980;
+    const type = /чорн|black/.test(n) ? "black" : /біл|white/.test(n) ? "white" : null;
+    return accs.find((a: any) => a.currencyCode === cur && (!type || a.type === type) && !st.accounts.some((y) => y.id !== x.id && y.mono_account_id === a.id));
+  };
+  for (const acc of st.accounts.filter((x) => x.mono_account_id)) {
+    const a = pick(acc);
+    if (!a) continue;
+    if (a.id !== acc.mono_account_id && !String(acc.mono_account_id).startsWith("pan:")) newIds.push(a.id);
+    await db.from("accounts").update({ mono_account_id: a.id, balance: a.balance / 100, credit_limit: a.creditLimit ? a.creditLimit / 100 : 0 }).eq("id", acc.id);
+    if (acc.kind === "credit_card") {
+      const used = Math.max(0, ((a.creditLimit || 0) - a.balance) / 100);
+      await db.from("debts").update({ balance: used, credit_limit: (a.creditLimit || 0) / 100 }).eq("user_id", uid).eq("kind", "credit_line").eq("lender", "monobank");
     }
+  }
+  if (newIds.length) {
+    const { data: sec } = await db.from("user_secrets").select("mono_backfill").eq("user_id", uid).single();
+    await db.from("user_secrets").update({ mono_backfill: [...new Set([...(sec?.mono_backfill || []), ...newIds])] }).eq("user_id", uid);
   }
   await db.from("user_secrets").update({ mono_last_sync: new Date().toISOString() }).eq("user_id", uid);
   return info;
