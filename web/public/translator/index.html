@@ -108,9 +108,9 @@ table.log td,table.log th{border-bottom:1px solid var(--line);padding:5px 6px;te
 <script>
 const API = 'https://pbpykslavelftkerhtib.supabase.co/functions/v1/lit-translate';
 const MODELS = {
-  'claude-opus-5-5': {name:'Claude Opus 5.5 — найкраща якість (рекомендовано)', in:4, out:20, cr:.2},
-  'claude-sonnet-5-5': {name:'Claude Sonnet 5.5 — удвічі дешевше', in:2, out:10, cr:.2},
-  'claude-fable-5-1': {name:'Claude Fable 5.1 — найсильніша, дорога', in:10, out:50, cr:1},
+  'claude-opus-5-5': {name:'Claude Opus 5.5 — найкраща якість (рекомендовано)', in:4, out:20, cr:.2, cw:5},
+  'claude-sonnet-5-5': {name:'Claude Sonnet 5.5 — удвічі дешевше', in:2, out:10, cr:.2, cw:2.5},
+  'claude-fable-5-1': {name:'Claude Fable 5.1 — найсильніша, дорога', in:10, out:50, cr:1, cw:12.5},
 };
 const STATUS = {new:'нове', running:'працює', waiting_approval:'чекає твого затвердження', paused:'на паузі', done:'готово', error:'помилка'};
 const S = { key: lsGet('lt_key'), list: [], cur: null, tab: lsGet('lt_tab') || 'bi', view: 'list', poll: null, editAnalysis: false, editing: null, showDraft: {} };
@@ -131,17 +131,14 @@ async function api(action, body = {}) {
 }
 
 // ───────── оцінка вартості ─────────
-function estimate(w, model) {
+function estimate(w, model, web) {
+  // калібровано на реальному прогоні (Opus 5.5: аналіз ≈ $0.75, ≈ $0.30 на кожні 350 слів перекладу+редактури)
   const m = MODELS[model] || MODELS['claude-opus-5-5'];
-  const srcTok = w * 1.35, ukOut = w * 2.6, passport = 9000;
-  const nseg = Math.max(1, Math.ceil(w / 350));
-  // аналіз: 3 проходи по всьому тексту + вихід паспорта з міркуваннями
-  const analysis = (srcTok * 1.25 * m.in + 2 * srcTok * m.cr + 3 * 9000 * m.out) / 1e6;
-  // переклад + редактура: кешований оригінал+паспорт, вихід з міркуваннями
-  const perSeg = 2 * ((srcTok + passport) * m.cr + 2500 * m.in) / 1e6;
-  const out = (ukOut * 2.2 + nseg * 2 * 3000) * m.out / 1e6;
-  const total = analysis + nseg * perSeg + out + (srcTok + passport) * 1.25 * m.in / 1e6;
-  return { lo: total * 0.7, hi: total * 1.4, nseg, minutes: Math.round((3 * 1.5 + nseg * 2 * 1.1)) };
+  const srcTok = w * 1.35, nseg = Math.max(1, Math.ceil(w / 350));
+  const analysis = (srcTok * 1.25 * m.in + 2 * srcTok * m.cr + 3 * (7500 + w * 0.4) * m.out) / 1e6 + (web ? 0.25 : 0);
+  const perSeg = (12700 * m.out + 2 * (srcTok + 12000) * m.cr + 3000 * m.in) / 1e6;
+  const total = analysis + nseg * perSeg + (srcTok + 12000) * m.cw / 1e6;
+  return { lo: total * 0.75, hi: total * 1.3, nseg, minutes: Math.round(4.5 + nseg * 2) };
 }
 
 // ───────── читання файлів ─────────
@@ -238,10 +235,10 @@ function renderNew(el) {
   const upd = () => {
     const w = words($('#src').value); $('#wc').textContent = w + ' слів';
     if (w < 20) { $('#est').textContent = ''; return; }
-    const e = estimate(w, $('#model').value);
+    const e = estimate(w, $('#model').value, $('#web').checked);
     $('#est').innerHTML = `Оцінка: <b>${fmt$(e.lo)}–${fmt$(e.hi)}</b> · ${e.nseg} фрагм. · ≈${e.minutes} хв роботи на сервері (можна закрити вкладку)`;
   };
-  $('#src').oninput = upd; $('#model').onchange = upd;
+  $('#src').oninput = upd; $('#model').onchange = upd; $('#web').onchange = upd;
   $('#file').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     try { $('#src').value = await readFile(f); if (!$('#title').value) $('#title').value = f.name.replace(/\.[^.]+$/, ''); upd(); }
