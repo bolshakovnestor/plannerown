@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Художній перекладач EN→UK</title>
+<meta name="theme-color" content="#f4efe6">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+:root{
+  --bg:#f4efe6;--panel:#fffdf8;--ink:#1f1b16;--muted:#6f665b;--line:#e3dacb;--accent:#8a3b12;--accent-2:#b5592a;
+  --ok:#2f6b3a;--warn:#a26a00;--err:#a12c2c;--chip:#efe6d6;--doubt:#fff1cf;--shadow:0 1px 2px rgba(60,40,20,.06),0 6px 24px rgba(60,40,20,.06);
+  --serif:'Literata',Georgia,serif;--sans:'Inter',system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#17140f;--panel:#201c16;--ink:#efe7da;--muted:#a99d8c;--line:#3a3329;--accent:#e08a55;--accent-2:#f0a271;--chip:#2c261e;--doubt:#3a3018;--shadow:none}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+.app{display:grid;grid-template-columns:290px 1fr;min-height:100vh}
+aside{border-right:1px solid var(--line);padding:18px 14px;position:sticky;top:0;height:100vh;overflow:auto;background:var(--bg)}
+main{padding:22px 28px 80px;max-width:1180px;width:100%;min-width:0}
+html,body{overflow-x:hidden}
+select.btn{width:auto;padding:4px 9px}
+.brand{font-family:var(--serif);font-size:20px;font-weight:600;margin:0 4px 2px}
+.brand small{display:block;font:12px var(--sans);color:var(--muted);font-weight:400}
+.btn{border:1px solid var(--line);background:var(--panel);padding:8px 14px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-2)}
+.btn.ghost{background:transparent}
+.btn.sm{padding:4px 9px;font-size:13px;border-radius:7px}
+.btn.danger{color:var(--err)}
+.btn:disabled{opacity:.5;cursor:default}
+.list{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+.item{padding:10px 11px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+.item:hover{background:var(--panel)}
+.item.active{background:var(--panel);border-color:var(--line);box-shadow:var(--shadow)}
+.item b{display:block;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item span{font-size:12px;color:var(--muted)}
+.chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--chip);color:var(--muted)}
+.chip.running{color:var(--warn)}.chip.done{color:var(--ok)}.chip.error{color:var(--err)}.chip.waiting_approval{color:var(--accent)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:var(--shadow);margin-bottom:16px}
+h1{font-family:var(--serif);font-weight:600;font-size:26px;margin:0 0 4px}
+h2{font-family:var(--serif);font-weight:600;font-size:19px;margin:0 0 10px}
+.sub{color:var(--muted);font-size:13px}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input[type=text],input[type=password],select,textarea{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:9px 11px}
+textarea{min-height:260px;font-family:var(--serif);font-size:15px;line-height:1.55;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.check{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:14px;color:var(--ink)}
+.check input{margin-top:4px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.spacer{flex:1}
+.progress{height:6px;background:var(--chip);border-radius:6px;overflow:hidden;margin:10px 0 4px}
+.progress i{display:block;height:100%;background:var(--accent);transition:width .6s}
+.live{font-family:var(--serif);white-space:pre-wrap;font-size:14px;color:var(--muted);max-height:220px;overflow:auto;border-left:3px solid var(--line);padding-left:12px;margin-top:10px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:6px 0 16px;overflow-x:auto}
+.tab{padding:9px 14px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted);white-space:nowrap}
+.tab.on{color:var(--ink);border-color:var(--accent)}
+.reading{font-family:var(--serif);font-size:17px;line-height:1.75;max-width:720px}
+.reading p{margin:0 0 .9em;text-indent:1.5em;white-space:pre-wrap}
+.bi{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}
+.bi .seghead{grid-column:1/-1;display:flex;gap:8px;align-items:center;padding:14px 0 6px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.bi .en,.bi .uk{padding:8px 14px 8px 0;font-family:var(--serif);font-size:15px;line-height:1.6;white-space:pre-wrap;border-bottom:1px dashed var(--line)}
+.bi .uk{padding-left:14px;border-left:1px solid var(--line)}
+.bi .uk.hasdoubt{background:var(--doubt)}
+.notes{grid-column:1/-1;padding:6px 0 10px}
+.note{font-size:13px;padding:6px 10px;border-radius:8px;background:var(--bg);margin:5px 0;border:1px solid var(--line)}
+.note.doubt{background:var(--doubt);border-color:#e6c46a}
+.note b{font-weight:600}
+.note .t{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);margin-right:6px}
+.md{font-size:15px;line-height:1.6}
+.md table{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0 14px;display:block;overflow-x:auto}
+.md th,.md td{border:1px solid var(--line);padding:6px 8px;vertical-align:top;text-align:left}
+.md th{background:var(--chip)}
+.md h1{font-size:22px;margin-top:18px}.md h2{font-size:18px;margin-top:20px}
+.md blockquote{margin:8px 0;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}
+.err{color:var(--err);background:color-mix(in srgb,var(--err) 8%,transparent);border-radius:9px;padding:10px 12px;font-size:14px;margin:8px 0}
+.hint{font-size:13px;color:var(--muted);margin-top:6px}
+.est{font-size:13px;color:var(--muted);margin-top:8px}
+.login{max-width:380px;margin:12vh auto}
+table.log{border-collapse:collapse;width:100%;font-size:13px}
+table.log td,table.log th{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
+.menu-btn{display:none}
+.edit-area{min-height:140px;font-size:15px}
+.diff del{background:color-mix(in srgb,var(--err) 18%,transparent);text-decoration:line-through}
+.diff ins{background:color-mix(in srgb,var(--ok) 18%,transparent);text-decoration:none}
+@media (max-width:860px){
+  .app{grid-template-columns:1fr}
+  aside{position:fixed;inset:0 25% 0 0;z-index:20;transform:translateX(-105%);transition:transform .2s;box-shadow:var(--shadow);height:100%}
+  aside.open{transform:none}
+  main{padding:14px 16px 80px}
+  .menu-btn{display:inline-block}
+  .row,.row3{grid-template-columns:1fr}
+  .bi{grid-template-columns:1fr}
+  .bi .uk{border-left:0;padding-left:0}
+  .bi .en{border-bottom:0;color:var(--muted);font-size:14px;padding-bottom:2px}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const API = 'https://pbpykslavelftkerhtib.supabase.co/functions/v1/lit-translate';
+const MODELS = {
+  'claude-opus-5-5': {name:'Claude Opus 5.5 — найкраща якість (рекомендовано)', in:4, out:20, cr:.2},
+  'claude-sonnet-5-5': {name:'Claude Sonnet 5.5 — удвічі дешевше', in:2, out:10, cr:.2},
+  'claude-fable-5-1': {name:'Claude Fable 5.1 — найсильніша, дорога', in:10, out:50, cr:1},
+};
+const STATUS = {new:'нове', running:'працює', waiting_approval:'чекає твого затвердження', paused:'на паузі', done:'готово', error:'помилка'};
+const S = { key: lsGet('lt_key'), list: [], cur: null, tab: lsGet('lt_tab') || 'bi', view: 'list', poll: null, editAnalysis: false, editing: null, showDraft: {} };
+
+function lsGet(k){ try { return localStorage.getItem(k) || ''; } catch { return ''; } }
+function lsSet(k,v){ try { localStorage.setItem(k,v); } catch {} }
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const words = s => (String(s).match(/\S+/g) || []).length;
+const fmt$ = n => '$' + Number(n || 0).toFixed(2);
+
+async function api(action, body = {}) {
+  const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json', 'x-app-key': S.key }, body: JSON.stringify({ action, ...body }) });
+  const d = await r.json().catch(() => ({ error: 'Сервер повернув не JSON (' + r.status + ')' }));
+  if (r.status === 401) { S.key = ''; lsSet('lt_key', ''); render(); throw new Error(d.error); }
+  if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+// ───────── оцінка вартості ─────────
+function estimate(w, model) {
+  const m = MODELS[model] || MODELS['claude-opus-5-5'];
+  const srcTok = w * 1.35, ukOut = w * 2.6, passport = 9000;
+  const nseg = Math.max(1, Math.ceil(w / 350));
+  // аналіз: 3 проходи по всьому тексту + вихід паспорта з міркуваннями
+  const analysis = (srcTok * 1.25 * m.in + 2 * srcTok * m.cr + 3 * 9000 * m.out) / 1e6;
+  // переклад + редактура: кешований оригінал+паспорт, вихід з міркуваннями
+  const perSeg = 2 * ((srcTok + passport) * m.cr + 2500 * m.in) / 1e6;
+  const out = (ukOut * 2.2 + nseg * 2 * 3000) * m.out / 1e6;
+  const total = analysis + nseg * perSeg + out + (srcTok + passport) * 1.25 * m.in / 1e6;
+  return { lo: total * 0.7, hi: total * 1.4, nseg, minutes: Math.round((3 * 1.5 + nseg * 2 * 1.1)) };
+}
+
+// ───────── читання файлів ─────────
+async function loadScript(src){ return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); }); }
+async function readFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.txt') || name.endsWith('.md')) return await file.text();
+  if (name.endsWith('.docx')) {
+    if (!window.mammoth) await loadScript('https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js');
+    const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    return r.value;
+  }
+  if (name.endsWith('.pdf')) {
+    if (!window.pdfjsLib) await loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    let out = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const c = await (await pdf.getPage(i)).getTextContent();
+      let page = '', lastY = null;
+      for (const it of c.items) {
+        const y = it.transform[5];
+        if (lastY !== null && Math.abs(y - lastY) > 2) page += (Math.abs(y - lastY) > 18 ? '\n\n' : '\n');
+        page += it.str; lastY = y;
+      }
+      out.push(page);
+    }
+    return out.join('\n\n');
+  }
+  throw new Error('Підтримуються TXT, DOCX, PDF');
+}
+
+// ───────── рендер ─────────
+function render() {
+  const root = $('#root');
+  if (!S.key) {
+    root.innerHTML = `<div class="login card"><h1>Художній перекладач</h1><p class="sub">EN → UK · аналіз стилю автора → переклад → редактура</p>
+      <label>Пароль доступу</label><input type="password" id="pw" autocomplete="current-password">
+      <div class="bar" style="margin-top:14px"><button class="btn primary" id="go">Увійти</button></div><div id="lerr"></div></div>`;
+    const go = async () => {
+      S.key = $('#pw').value.trim();
+      try { await api('ping'); lsSet('lt_key', S.key); boot(); } catch (e) { $('#lerr').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+    };
+    $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
+    return;
+  }
+  root.innerHTML = `<div class="app"><aside id="side"></aside><main id="main"></main></div>`;
+  renderSide(); renderMain();
+}
+
+function renderSide() {
+  const el = $('#side'); if (!el) return;
+  el.innerHTML = `<div class="brand">Художній перекладач<small>EN → UK · Claude</small></div>
+    <div style="margin-top:14px"><button class="btn primary" style="width:100%" id="new">+ Новий переклад</button></div>
+    <div class="list">${S.list.map(p => `<div class="item ${S.cur?.id === p.id ? 'active' : ''}" data-id="${p.id}">
+      <b>${esc(p.title)}</b>
+      <span><span class="chip ${p.status}">${STATUS[p.status] || p.status}</span> ${p.ndone}/${p.nseg} · ${p.words} сл. · ${fmt$(p.cost_usd)}</span></div>`).join('') || '<p class="sub" style="padding:8px">Ще немає перекладів</p>'}</div>`;
+  $('#new').onclick = () => { S.view = 'new'; S.cur = null; stopPoll(); closeSide(); render(); };
+  el.querySelectorAll('.item').forEach(x => x.onclick = () => { closeSide(); openProject(x.dataset.id); });
+}
+const closeSide = () => $('#side')?.classList.remove('open');
+const menuBtn = () => `<button class="btn ghost sm menu-btn" onclick="document.getElementById('side').classList.add('open')">☰ Список</button>`;
+
+function renderMain() {
+  const el = $('#main'); if (!el) return;
+  if (S.view === 'new' || (!S.cur && !S.list.length)) return renderNew(el);
+  if (!S.cur) { el.innerHTML = `${menuBtn()}<div class="card"><h2>Обери переклад зліва або створи новий</h2></div>`; return; }
+  renderProject(el);
+}
+
+function renderNew(el) {
+  el.innerHTML = `${menuBtn()}<h1>Новий переклад</h1><p class="sub">Спочатку модель читає весь текст і складає перекладацький паспорт: ідіостиль автора, настрій, персонажі, імена, реалії епохи, образність і стратегію. Потім перекладає фрагмент за фрагментом з урахуванням усього тексту, а редактор перевіряє точність, стиль і норми української мови.</p>
+  <div class="card">
+    <div class="row"><div><label>Назва твору</label><input type="text" id="title" placeholder="The Gift of the Magi"></div>
+    <div><label>Автор</label><input type="text" id="author" placeholder="O. Henry"></div></div>
+    <label>Текст англійською (вставити або завантажити файл)</label>
+    <textarea id="src" placeholder="Встав сюди уривок або весь твір…"></textarea>
+    <div class="bar" style="margin-top:8px"><label class="btn sm" style="margin:0">Завантажити TXT / DOCX / PDF<input type="file" id="file" accept=".txt,.md,.docx,.pdf" hidden></label><span class="sub" id="wc">0 слів</span></div>
+    <label>Побажання до перекладу (необов'язково)</label>
+    <input type="text" id="notes" placeholder="напр.: для дитячого видання; зберегти «містер/місіс»; ім'я Della → Делла">
+    <div class="row3">
+      <div><label>Модель</label><select id="model">${Object.entries(MODELS).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}</select></div>
+      <div><label>Глибина міркувань (effort)</label><select id="effort">
+        <option value="high" selected>high — рекомендовано</option><option value="xhigh">xhigh — ще ретельніше, повільніше</option>
+        <option value="medium">medium — швидше й дешевше</option></select></div>
+      <div><label>&nbsp;</label>
+        <div class="check"><input type="checkbox" id="pause" checked><span>Зупинитися після аналізу, щоб я переглянув і затвердив паспорт</span></div></div>
+    </div>
+    <div class="check"><input type="checkbox" id="web" checked><span>Перевіряти історичні факти й реалії в інтернеті під час аналізу (≈$0.01 за пошук)</span></div>
+    <div class="est" id="est"></div>
+    <div id="nerr"></div>
+    <div class="bar" style="margin-top:14px"><button class="btn primary" id="start">Почати</button></div>
+  </div>`;
+  const upd = () => {
+    const w = words($('#src').value); $('#wc').textContent = w + ' слів';
+    if (w < 20) { $('#est').textContent = ''; return; }
+    const e = estimate(w, $('#model').value);
+    $('#est').innerHTML = `Оцінка: <b>${fmt$(e.lo)}–${fmt$(e.hi)}</b> · ${e.nseg} фрагм. · ≈${e.minutes} хв роботи на сервері (можна закрити вкладку)`;
+  };
+  $('#src').oninput = upd; $('#model').onchange = upd;
+  $('#file').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { $('#src').value = await readFile(f); if (!$('#title').value) $('#title').value = f.name.replace(/\.[^.]+$/, ''); upd(); }
+    catch (er) { $('#nerr').innerHTML = `<div class="err">${esc(er.message)}</div>`; }
+  };
+  $('#start').onclick = async () => {
+    const b = $('#start'); b.disabled = true; b.textContent = 'Створюю…';
+    try {
+      const r = await api('create', { title: $('#title').value, author: $('#author').value, notes_for_ai: $('#notes').value, source: $('#src').value,
+        model: $('#model').value, effort: $('#effort').value, pause_after_analysis: $('#pause').checked, web_research: $('#web').checked });
+      S.view = 'project'; await refreshList(); openProject(r.id);
+    } catch (e) { $('#nerr').innerHTML = `<div class="err">${esc(e.message)}</div>`; b.disabled = false; b.textContent = 'Почати'; }
+  };
+}
+
+const textOf = s => s.user || s.final || s.draft || null;
+
+function renderProject(el) {
+  const p = S.cur, segs = p.segments || [];
+  const totalSteps = 3 + segs.length * 2;
+  const doneSteps = (p.analysis_parts || []).filter(Boolean).length + segs.reduce((a, s) => a + (s.draft ? 1 : 0) + (s.final ? 1 : 0), 0);
+  const pct = Math.round(100 * doneSteps / totalSteps);
+  const running = p.status === 'running';
+  const doubts = segs.reduce((a, s) => a + (s.notes || []).filter(n => n.doubt).length, 0);
+  el.innerHTML = `${menuBtn()}
+  <div class="bar"><div><h1>${esc(p.title)}</h1><div class="sub">${esc(p.author || '')} · ${MODELS[p.model]?.name.split(' —')[0] || p.model} · effort ${p.effort} · ${segs.reduce((a, s) => a + words(s.src.join(' ')), 0)} слів · ${segs.length} фрагм. · витрачено <b>${fmt$(p.cost_usd)}</b></div></div></div>
+  <div class="card">
+    <div class="bar"><span class="chip ${p.status}">${STATUS[p.status] || p.status}</span><span class="sub">${esc(running ? (p.step || 'у черзі…') : '')}</span><span class="spacer"></span>
+      ${running ? `<button class="btn sm" id="stop">Пауза</button>` : ''}
+      ${['paused', 'error', 'new'].includes(p.status) ? `<button class="btn sm primary" id="resume">Продовжити</button>` : ''}
+      ${p.status === 'waiting_approval' ? `<button class="btn sm primary" id="approve">Затвердити паспорт і перекладати</button>` : ''}
+      ${p.status === 'done' || p.status === 'paused' ? exportMenu() : ''}
+    </div>
+    <div class="progress"><i style="width:${pct}%"></i></div><div class="sub">${doneSteps} з ${totalSteps} кроків${doubts ? ` · <b>${doubts}</b> сумнівних місць позначено` : ''}</div>
+    ${p.error ? `<div class="err">${esc(p.error)}</div>` : ''}
+    ${p.status === 'waiting_approval' ? `<p class="hint">Переглянь вкладку «Паспорт тексту»: виправ імена, реалії чи стратегію, якщо треба (кнопка «Редагувати»), і натисни «Затвердити». Переклад піде строго за ним.</p>` : ''}
+    ${running && p.progress ? `<div class="live">${esc(p.progress.slice(-1500))}</div>` : ''}
+  </div>
+  <div class="tabs">${[['bi', 'Двомовний'], ['read', 'Читати переклад'], ['analysis', 'Паспорт тексту'], ['log', 'Журнал і вартість'], ['src', 'Оригінал']].map(([k, t]) => `<div class="tab ${S.tab === k ? 'on' : ''}" data-t="${k}">${t}</div>`).join('')}</div>
+  <div id="tabc"></div>
+  <div class="bar" style="margin-top:28px"><span class="spacer"></span>
+    <button class="btn sm ghost" id="redoA">Повторити аналіз і переклад з нуля</button>
+    <button class="btn sm ghost" id="redoT">Перекласти заново (той самий паспорт)</button>
+    <button class="btn sm ghost danger" id="del">Видалити</button></div>`;
+  el.querySelectorAll('.tab').forEach(t => t.onclick = () => { S.tab = t.dataset.t; lsSet('lt_tab', S.tab); renderProject(el); });
+  const act = (id, fn) => { const b = $('#' + id); if (b) b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { alert(e.message); } await reload(); }; };
+  act('stop', () => api('stop', { id: p.id }));
+  act('resume', () => api('run', { id: p.id, resume: true }));
+  act('approve', () => api('approve', { id: p.id }));
+  act('redoA', () => confirm('Видалити паспорт і весь переклад та почати спочатку?') && api('redo', { id: p.id, what: 'analysis' }));
+  act('redoT', () => confirm('Видалити переклад і перекласти заново за поточним паспортом?') && api('redo', { id: p.id, what: 'translation' }));
+  const del = $('#del'); del.onclick = async () => { if (!confirm('Видалити цей переклад назавжди?')) return; await api('delete', { id: p.id }); S.cur = null; stopPoll(); await refreshList(); render(); };
+  wireExport();
+  renderTab();
+}
+
+function renderTab() {
+  const el = $('#tabc'), p = S.cur, segs = p.segments || [];
+  if (S.tab === 'analysis') {
+    if (!p.analysis && !(p.analysis_parts || []).length) { el.innerHTML = `<div class="card sub">Аналіз ще не готовий.</div>`; return; }
+    const md = p.analysis || (p.analysis_parts || []).join('\n\n---\n\n');
+    if (S.editAnalysis) {
+      el.innerHTML = `<div class="card"><p class="hint">Редагуй markdown. Зміни застосуються до всіх фрагментів, які ще не перекладено (або натисни «Перекласти заново»).</p><textarea id="ana" style="min-height:60vh;font-family:var(--sans);font-size:14px">${esc(md)}</textarea>
+      <div class="bar" style="margin-top:10px"><button class="btn primary" id="saveA">Зберегти</button><button class="btn" id="cancelA">Скасувати</button></div></div>`;
+      $('#saveA').onclick = async () => { await api('update', { id: p.id, patch: { analysis: $('#ana').value } }); S.editAnalysis = false; reload(); };
+      $('#cancelA').onclick = () => { S.editAnalysis = false; renderTab(); };
+    } else {
+      el.innerHTML = `<div class="card"><div class="bar"><span class="spacer"></span>${p.analysis && p.status !== 'running' ? `<button class="btn sm" id="editA">Редагувати</button>` : ''}</div><div class="md">${marked.parse(md)}</div></div>`;
+      const b = $('#editA'); if (b) b.onclick = () => { S.editAnalysis = true; renderTab(); };
+    }
+    return;
+  }
+  if (S.tab === 'read') {
+    const parts = segs.map(textOf).filter(Boolean).flat();
+    el.innerHTML = parts.length ? `<div class="card"><div class="reading">${parts.map(t => `<p>${esc(t)}</p>`).join('')}</div></div>` : `<div class="card sub">Переклад ще не готовий.</div>`;
+    return;
+  }
+  if (S.tab === 'src') { el.innerHTML = `<div class="card"><div class="reading">${p.source.split(/\n\n+/).map(t => `<p>${esc(t)}</p>`).join('')}</div></div>`; return; }
+  if (S.tab === 'log') {
+    const t = p.tokens || {};
+    el.innerHTML = `<div class="card"><p>Разом: <b>${fmt$(p.cost_usd)}</b> · вхід ${t.input || 0} · вихід ${t.output || 0} · з кешу ${t.cache_read || 0} · запис у кеш ${t.cache_write || 0} · вебпошуків ${t.searches || 0} токенів</p>
+      <table class="log"><tr><th>Час</th><th>Крок</th><th>сек</th><th>вхід</th><th>вихід</th><th>кеш</th><th>$</th></tr>
+      ${(p.log || []).slice().reverse().map(l => `<tr><td>${new Date(l.at).toLocaleTimeString('uk')}</td><td>${esc(l.step)}</td><td>${l.sec}</td><td>${l.input}</td><td>${l.output}</td><td>${l.cache_read}</td><td>${l.usd}</td></tr>`).join('')}</table></div>`;
+    return;
+  }
+  // двомовний
+  el.innerHTML = `<div class="card" style="padding-top:6px"><div class="bi">${segs.map((s, i) => segHtml(s, i)).join('')}</div></div>`;
+  el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => segAction(b.dataset.act, +b.dataset.i));
+}
+
+function segHtml(s, i) {
+  const p = S.cur, t = textOf(s), notes = s.notes || [];
+  const stage = s.user ? 'відредаговано тобою' : s.final ? 'відредаговано' : s.draft ? 'чернетка, чекає редактури' : 'ще не перекладено';
+  const busy = p.status === 'running';
+  const head = `<div class="seghead"><b>Фрагмент ${i + 1}</b><span class="chip">${stage}</span><span class="spacer"></span>
+    ${!busy && t ? `<button class="btn sm" data-act="edit" data-i="${i}">Редагувати</button>` : ''}
+    ${s.final && s.draft ? `<button class="btn sm ghost" data-act="draft" data-i="${i}">${S.showDraft[i] ? 'Сховати' : 'Показати'} правки редактора</button>` : ''}
+    ${!busy && s.draft ? `<button class="btn sm ghost" data-act="rereview" data-i="${i}">Повторити редактуру</button>
+      <button class="btn sm ghost" data-act="retrans" data-i="${i}">Перекласти заново</button>` : ''}</div>`;
+  if (S.editing === i) {
+    return head + `<div style="grid-column:1/-1"><textarea class="edit-area" id="ed">${esc((t || []).join('\n\n'))}</textarea>
+      <p class="hint">Абзаци розділяй порожнім рядком (їх має бути ${s.src.length}).</p>
+      <div class="bar"><button class="btn sm primary" data-act="save" data-i="${i}">Зберегти</button><button class="btn sm" data-act="cancel" data-i="${i}">Скасувати</button>${s.user ? `<button class="btn sm ghost" data-act="revert" data-i="${i}">Повернути версію редактора</button>` : ''}</div></div>`;
+  }
+  const rows = s.src.map((en, k) => {
+    const pn = notes.filter(n => +n.p === k + 1);
+    const uk = t ? (S.showDraft[i] && s.final ? diffHtml(s.draft[k] || '', s.final[k] || '') : esc(t[k] || '')) : '<span class="sub">…</span>';
+    return `<div class="en">${esc(en)}</div><div class="uk ${pn.some(n => n.doubt) ? 'hasdoubt' : ''}${S.showDraft[i] ? ' diff' : ''}">${uk}</div>
+      ${pn.length ? `<div class="notes">${pn.map(n => `<div class="note ${n.doubt ? 'doubt' : ''}"><span class="t">${esc(n.type || '')}${n.doubt ? ' · перевір' : ''}</span><b>${esc(n.src || '')}</b> → ${esc(n.uk || '')} <span class="sub">· ${esc(n.strategy || '')}</span><div>${esc(n.comment || '')}</div></div>`).join('')}</div>` : ''}`;
+  }).join('');
+  return head + rows;
+}
+
+// пословний diff (LCS) для показу правок редактора
+function diffHtml(a, b) {
+  const A = a.split(/(\s+)/), B = b.split(/(\s+)/);
+  if (A.length * B.length > 400000) return esc(b);
+  const n = A.length, m = B.length, L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0, out = '';
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out += esc(A[i]); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) { out += `<del>${esc(A[i])}</del>`; i++; }
+    else { out += `<ins>${esc(B[j])}</ins>`; j++; }
+  }
+  while (i < n) out += `<del>${esc(A[i++])}</del>`;
+  while (j < m) out += `<ins>${esc(B[j++])}</ins>`;
+  return out;
+}
+
+async function segAction(a, i) {
+  const p = S.cur;
+  try {
+    if (a === 'edit') { S.editing = i; return renderTab(); }
+    if (a === 'cancel') { S.editing = null; return renderTab(); }
+    if (a === 'draft') { S.showDraft[i] = !S.showDraft[i]; return renderTab(); }
+    if (a === 'save') {
+      const parts = $('#ed').value.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+      const n = p.segments[i].src.length;
+      if (parts.length !== n && !confirm(`Абзаців ${parts.length}, а в оригіналі ${n}. Зберегти так? (зайві об'єднаються в останній)`)) return;
+      while (parts.length > n) parts[n - 1] += '\n\n' + parts.splice(n, 1)[0];
+      while (parts.length < n) parts.push('');
+      await api('update', { id: p.id, segment: i, user: parts }); S.editing = null; return reload();
+    }
+    if (a === 'revert') { await api('update', { id: p.id, segment: i, user: null }); S.editing = null; return reload(); }
+    if (a === 'rereview') { await api('redo', { id: p.id, what: 'review', index: i }); return reload(); }
+    if (a === 'retrans') { if (!confirm('Перекласти цей фрагмент заново?')) return; await api('redo', { id: p.id, what: 'segment', index: i }); return reload(); }
+  } catch (e) { alert(e.message); }
+}
+
+// ───────── експорт ─────────
+function exportMenu() {
+  return `<select class="btn sm" id="exp"><option value="">Завантажити…</option><option value="docx">Чистий DOCX (Times New Roman 14, 1,5)</option>
+    <option value="bihtml">Двомовний HTML з поясненнями</option><option value="bidocx">Двомовний DOCX (таблиця)</option><option value="md">Рішення щодо образів і реалій (.md)</option><option value="txt">Переклад (.txt)</option></select>`;
+}
+function wireExport() { const s = $('#exp'); if (s) s.onchange = async () => { const v = s.value; s.value = ''; if (v) try { await doExport(v); } catch (e) { alert(e.message); } }; }
+function save(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+const fileBase = () => (S.cur.title || 'translation').replace(/[\\/:*?"<>|]+/g, '').slice(0, 60);
+
+async function doExport(kind) {
+  const p = S.cur, segs = p.segments;
+  const ukParas = segs.flatMap(s => textOf(s) || s.src.map(() => '[не перекладено]'));
+  if (kind === 'txt') return save(fileBase() + ' (UK).txt', new Blob([ukParas.join('\n\n')], { type: 'text/plain;charset=utf-8' }));
+  if (kind === 'md') {
+    let md = `# ${p.title} — рішення перекладача\n\n`;
+    segs.forEach((s, i) => (s.notes || []).forEach(n => {
+      md += `- **[${i + 1}.${n.p}] ${n.type}${n.doubt ? ' ⚠ перевір' : ''}** — «${n.src}» → «${n.uk}» · _${n.strategy}_. ${n.comment}\n`;
+    }));
+    md += `\n---\n\n# Перекладацький паспорт тексту\n\n${p.analysis || ''}\n`;
+    return save(fileBase() + ' — рішення.md', new Blob([md], { type: 'text/markdown;charset=utf-8' }));
+  }
+  if (kind === 'bihtml') {
+    let rows = '';
+    segs.forEach((s, i) => { const t = textOf(s) || []; s.src.forEach((en, k) => {
+      const pn = (s.notes || []).filter(n => +n.p === k + 1);
+      rows += `<tr><td>${esc(en)}</td><td class="${pn.some(n => n.doubt) ? 'd' : ''}">${esc(t[k] || '')}${pn.length ? `<div class="n">${pn.map(n => `<p>${n.doubt ? '⚠ ' : ''}<b>${esc(n.type)}</b>: «${esc(n.src)}» → «${esc(n.uk)}» — <i>${esc(n.strategy)}</i>. ${esc(n.comment)}</p>`).join('')}</div>` : ''}</td></tr>`; }); });
+    const html = `<!doctype html><meta charset="utf-8"><title>${esc(p.title)} — EN|UK</title><style>body{font:16px/1.6 Georgia,serif;max-width:1200px;margin:30px auto;padding:0 16px}table{border-collapse:collapse;width:100%}td{vertical-align:top;border-bottom:1px solid #ddd;padding:8px 10px;width:50%;white-space:pre-wrap}td.d{background:#fff4d1}.n{font:13px/1.45 system-ui,sans-serif;color:#555;margin-top:6px;white-space:normal}.n p{margin:3px 0}</style><h1>${esc(p.title)}</h1><p>${esc(p.author || '')}</p><table>${rows}</table>`;
+    return save(fileBase() + ' — EN-UK.html', new Blob([html], { type: 'text/html;charset=utf-8' }));
+  }
+  if (!window.docx) await loadScript('https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js');
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType } = window.docx;
+  const font = 'Times New Roman';
+  const para = (text, opts = {}) => new Paragraph({ spacing: { line: 360 }, indent: opts.noIndent ? undefined : { firstLine: 709 }, alignment: opts.center ? AlignmentType.CENTER : AlignmentType.JUSTIFIED,
+    children: String(text).split('\n').map((line, j) => new TextRun({ text: line, font, size: opts.size || 28, bold: opts.bold, break: j ? 1 : 0 })) });
+  let children;
+  if (kind === 'docx') {
+    children = [para(p.title, { center: true, bold: true, noIndent: true }), ...(p.author ? [para(p.author, { center: true, noIndent: true })] : []), para('', { noIndent: true }), ...ukParas.map(t => para(t))];
+  } else {
+    const rows = [];
+    segs.forEach(s => { const t = textOf(s) || []; s.src.forEach((en, k) => rows.push(new TableRow({ children: [
+      new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [para(en, { noIndent: true, size: 24 })] }),
+      new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [para(t[k] || '', { noIndent: true, size: 24 })] })] }))); });
+    children = [para(p.title, { center: true, bold: true, noIndent: true }), new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows })];
+  }
+  const doc = new Document({ styles: { default: { document: { run: { font, size: 28 } } } },
+    sections: [{ properties: { page: { margin: { top: 1134, bottom: 1134, left: 1701, right: 850 } } }, children }] });
+  save(fileBase() + (kind === 'docx' ? ' (UK).docx' : ' — EN-UK.docx'), await Packer.toBlob(doc));
+}
+
+// ───────── дані й опитування ─────────
+async function refreshList() { try { S.list = await api('list'); } catch (e) { console.error(e); } }
+async function openProject(id) {
+  S.view = 'project'; S.editing = null; S.editAnalysis = false; S.showDraft = {};
+  try { S.cur = await api('get', { id }); } catch (e) { alert(e.message); return; }
+  if (S.cur.status === 'waiting_approval') S.tab = 'analysis';
+  render(); startPoll();
+}
+async function reload() {
+  if (!S.cur) return;
+  const keepScroll = window.scrollY;
+  try { S.cur = await api('get', { id: S.cur.id }); } catch (e) { console.error(e); return; }
+  await refreshList();
+  if (S.editing !== null || S.editAnalysis) { renderSide(); return; } // не збиваємо редагування
+  renderSide(); renderProject($('#main')); window.scrollTo(0, keepScroll);
+  startPoll();
+}
+function startPoll() {
+  stopPoll();
+  if (S.cur && S.cur.status === 'running') S.poll = setTimeout(reload, 4000);
+}
+function stopPoll() { if (S.poll) clearTimeout(S.poll); S.poll = null; }
+
+async function boot() {
+  render();
+  await refreshList();
+  if (S.list.length) { const r = S.list.find(x => x.status === 'running') || S.list[0]; openProject(r.id); }
+  else { S.view = 'new'; render(); }
+}
+if (S.key) boot(); else render();
+</script>
+</body>
+</html>
