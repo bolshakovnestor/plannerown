@@ -73,6 +73,9 @@ textarea{min-height:260px;font-family:var(--serif);font-size:15px;line-height:1.
 .note{font-size:13px;padding:6px 10px;border-radius:8px;background:var(--bg);margin:5px 0;border:1px solid var(--line)}
 .note.doubt{background:var(--doubt);border-color:#e6c46a}
 .note b{font-weight:600}
+.note.fnote{border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
+sup.fn{color:var(--accent);font-weight:600;font-family:var(--sans);font-size:.7em;padding-left:1px}
+.fnlist{font-size:14px;line-height:1.5}.fnlist p{text-indent:0;margin:0 0 .4em}
 .note .t{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);margin-right:6px}
 .md{font-size:15px;line-height:1.6}
 .md table{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0 14px;display:block;overflow-x:auto}
@@ -247,6 +250,7 @@ function renderNew(el) {
       <div><label>&nbsp;</label>
         <div class="check"><input type="checkbox" id="pause" checked><span>Зупинитися після аналізу, щоб я переглянув і затвердив паспорт</span></div></div>
     </div>
+    <div class="check"><input type="checkbox" id="fnotes" checked><span>Додавати примітки перекладача (виноски) там, де без пояснення історико-культурного контексту, реалії чи терміна не обійтися</span></div>
     <div class="check"><input type="checkbox" id="web" checked><span>Перевіряти історичні факти й реалії в інтернеті під час аналізу (≈$0.01 за пошук)</span></div>
     <div class="est" id="est"></div>
     <div id="nerr"></div>
@@ -268,21 +272,43 @@ function renderNew(el) {
     const b = $('#start'); b.disabled = true; b.textContent = 'Створюю…';
     try {
       const r = await api('create', { title: $('#title').value, author: $('#author').value, notes_for_ai: $('#notes').value, source: $('#src').value,
-        model: $('#model').value, effort: $('#effort').value, pause_after_analysis: $('#pause').checked, web_research: $('#web').checked });
+        model: $('#model').value, effort: $('#effort').value, pause_after_analysis: $('#pause').checked, web_research: $('#web').checked, footnotes: $('#fnotes').checked });
       S.view = 'project'; await refreshList(); openProject(r.id);
     } catch (e) { $('#nerr').innerHTML = `<div class="err">${esc(e.message)}</div>`; b.disabled = false; b.textContent = 'Почати'; }
   };
 }
 
 const textOf = s => s.user || s.final || s.draft || null;
+const FN_RE = /\[\^(\d+)\]/g;
+const supify = (html) => html.replace(/\[\^(\d+)\]/g, '<sup class="fn">$1</sup>');
+
+// наскрізна нумерація приміток перекладача по всьому тексту
+function globalize(segs) {
+  let g = 0; const notes = [];
+  const out = segs.map(s => {
+    const t = textOf(s); if (!t) return null;
+    const fm = new Map((s.fn || []).map(f => [+f.id, f.text])), map = new Map();
+    return t.map(par => String(par || '').replace(FN_RE, (_m, d) => {
+      d = +d; if (!fm.has(d)) return '';
+      if (!map.has(d)) { map.set(d, ++g); notes.push({ n: g, text: fm.get(d) }); }
+      return `[^${map.get(d)}]`;
+    }));
+  });
+  return { out, notes };
+}
+const allFinal = p => (p.segments || []).length && p.segments.every(s => s.final || s.user);
 
 function renderProject(el) {
   const p = S.cur, segs = p.segments || [];
-  const totalSteps = 3 + segs.length * 2;
-  const doneSteps = (p.analysis_parts || []).filter(Boolean).length + segs.reduce((a, s) => a + (s.draft ? 1 : 0) + (s.final ? 1 : 0), 0);
-  const pct = Math.round(100 * doneSteps / totalSteps);
+  const activeRev = (p.revisions || []).find(r => r.status === 'running');
+  const baseSteps = 3 + segs.length * 2;
+  let totalSteps = baseSteps;
+  let doneSteps = (p.analysis_parts || []).filter(Boolean).length + segs.reduce((a, s) => a + (s.draft ? 1 : 0) + (s.final ? 1 : 0), 0);
+  if (activeRev) { totalSteps = segs.length; doneSteps = segs.filter(s => (s.rev || 0) >= activeRev.n).length; }
+  const pct = Math.round(100 * doneSteps / Math.max(1, totalSteps));
   const running = p.status === 'running';
   const doubts = segs.reduce((a, s) => a + (s.notes || []).filter(n => n.doubt).length, 0);
+  const nfn = segs.reduce((a, s) => a + (s.fn || []).length, 0);
   el.innerHTML = `${menuBtn()}
   <div class="bar"><div><h1>${esc(p.title)}</h1><div class="sub">${esc(p.author || '')} · ${MODELS[p.model]?.name.split(' —')[0] || p.model} · effort ${p.effort} · ${segs.reduce((a, s) => a + words(s.src.join(' ')), 0)} слів · ${segs.length} фрагм. · витрачено <b>${fmt$(p.cost_usd)}</b></div></div></div>
   <div class="card">
@@ -292,12 +318,12 @@ function renderProject(el) {
       ${p.status === 'waiting_approval' ? `<button class="btn sm primary" id="approve">Затвердити паспорт і перекладати</button>` : ''}
       ${p.status === 'done' || p.status === 'paused' ? exportMenu() : ''}
     </div>
-    <div class="progress"><i style="width:${pct}%"></i></div><div class="sub">${doneSteps} з ${totalSteps} кроків${doubts ? ` · <b>${doubts}</b> сумнівних місць позначено` : ''}</div>
+    <div class="progress"><i style="width:${pct}%"></i></div><div class="sub">${activeRev ? `Доредагування, раунд ${activeRev.n}: ` : ''}${doneSteps} з ${totalSteps} ${activeRev ? 'фрагментів' : 'кроків'}${doubts ? ` · <b>${doubts}</b> сумнівних місць позначено` : ''}${nfn ? ` · приміток перекладача: <b>${nfn}</b>` : ''}</div>
     ${p.error ? `<div class="err">${esc(p.error)}</div>` : ''}
     ${p.status === 'waiting_approval' ? `<p class="hint">Переглянь вкладку «Паспорт тексту»: виправ імена, реалії чи стратегію, якщо треба (кнопка «Редагувати»), і натисни «Затвердити». Переклад піде строго за ним.</p>` : ''}
     ${running && p.progress ? `<div class="live">${esc(p.progress.slice(-1500))}</div>` : ''}
   </div>
-  <div class="tabs">${[['bi', 'Двомовний'], ['read', 'Читати переклад'], ['analysis', 'Паспорт тексту'], ['log', 'Журнал і вартість'], ['src', 'Оригінал']].map(([k, t]) => `<div class="tab ${S.tab === k ? 'on' : ''}" data-t="${k}">${t}</div>`).join('')}</div>
+  <div class="tabs">${[['bi', 'Двомовний'], ['read', 'Читати переклад'], ['revise', 'Доредагування'], ['analysis', 'Паспорт тексту'], ['log', 'Журнал і вартість'], ['src', 'Оригінал']].map(([k, t]) => `<div class="tab ${S.tab === k ? 'on' : ''}" data-t="${k}">${t}</div>`).join('')}</div>
   <div id="tabc"></div>
   <div class="bar" style="margin-top:28px"><span class="spacer"></span>
     <button class="btn sm ghost" id="redoA">Повторити аналіз і переклад з нуля</button>
@@ -308,20 +334,79 @@ function renderProject(el) {
   act('stop', () => api('stop', { id: p.id }));
   act('resume', () => api('run', { id: p.id, resume: true }));
   act('approve', () => api('approve', { id: p.id }));
-  act('redoA', () => confirm('Видалити паспорт і весь переклад та почати спочатку?') && api('redo', { id: p.id, what: 'analysis' }));
-  act('redoT', () => confirm('Видалити переклад і перекласти заново за поточним паспортом?') && api('redo', { id: p.id, what: 'translation' }));
+  act('redoA', () => confirm('Видалити паспорт і весь переклад (разом з усіма доредагуваннями) та почати спочатку?') && api('redo', { id: p.id, what: 'analysis' }));
+  act('redoT', () => confirm('Видалити переклад (разом з усіма доредагуваннями) і перекласти заново за поточним паспортом?') && api('redo', { id: p.id, what: 'translation' }));
   const del = $('#del'); del.onclick = async () => { if (!confirm('Видалити цей переклад назавжди?')) return; await api('delete', { id: p.id }); S.cur = null; stopPoll(); await refreshList(); render(); };
   wireExport();
   renderTab();
 }
 
+// ───────── вкладка «Доредагування» ─────────
+function revEstimate(p, footnotes, instr, nRepl) {
+  const m = MODELS[p.model] || MODELS['claude-opus-5-5'];
+  const segs = p.segments.length;
+  const touched = (footnotes || instr) ? segs : Math.min(segs, Math.max(1, Math.ceil(segs * 0.6)));
+  const per = (4500 * m.out + 22000 * m.cr + 2500 * m.in) / 1e6;
+  return nRepl || footnotes || instr ? { lo: touched * per * 0.6, hi: touched * per * 1.3, touched } : null;
+}
+function renderRevise(el) {
+  const p = S.cur, revs = p.revisions || [];
+  const running = p.status === 'running';
+  const can = allFinal(p) && !running;
+  if (!S.rev) S.rev = { rows: [{ from: '', to: '' }], instr: '', fn: !(p.segments || []).some(s => (s.fn || []).length) };
+  const R = S.rev;
+  const lastDone = [...revs].reverse().find(r => r.status === 'done');
+  el.innerHTML = `<div class="card">
+    <h2>Доредагування промптом</h2>
+    <p class="sub">Вкажи, що замінити в усьому тексті, і свої побажання. Модель пройде всі фрагменти, внесе правки в усіх граматичних формах і не чіпатиме решту. Твої ручні правки зберігаються. Можна робити скільки завгодно раундів; кожен раунд можна відкотити.</p>
+    ${!allFinal(p) ? `<div class="err">Доступно після завершення перекладу й редактури.</div>` : ''}
+    <label>Замінити всюди (слово або вислів → на що)</label>
+    <div id="rows">${R.rows.map((r, k) => `<div class="row" style="grid-template-columns:1fr auto 1fr auto;align-items:center;margin-bottom:6px">
+      <input type="text" data-k="${k}" data-f="from" value="${esc(r.from)}" placeholder="напр.: пенні"><span class="sub">→</span>
+      <input type="text" data-k="${k}" data-f="to" value="${esc(r.to)}" placeholder="центи"><button class="btn sm ghost" data-del="${k}" title="Прибрати">✕</button></div>`).join('')}</div>
+    <button class="btn sm" id="addrow">+ Ще заміна</button>
+    <label>Додаткові побажання</label>
+    <textarea id="instr" style="min-height:110px;font-family:var(--sans);font-size:14px" placeholder="напр.: мова Джима — грубіша, простонародна; звертання «мем» замінити на «пані»; не використовувати слово «вельми»; діалоги зробити живішими">${esc(R.instr)}</textarea>
+    <div class="check"><input type="checkbox" id="revfn" ${R.fn ? 'checked' : ''}><span>Додати або оновити <b>примітки перекладача</b> — історико-культурний контекст транслітерованих реалій, терміни, алюзії, неперекладна гра слів (лише де без них не обійтися). У DOCX вони стануть виносками внизу сторінки.</span></div>
+    <div class="est" id="revest"></div>
+    <div class="bar" style="margin-top:14px"><button class="btn primary" id="revgo" ${can ? '' : 'disabled'}>Застосувати до всього тексту</button>
+      ${lastDone && !running ? `<span class="spacer"></span><button class="btn sm ghost" id="undo">Відкотити раунд ${lastDone.n}</button>` : ''}</div>
+  </div>
+  ${revs.length ? `<div class="card"><h2>Історія раундів</h2>${revs.slice().reverse().map(r => `<div class="note"><span class="t">раунд ${r.n} · ${r.status === 'done' ? 'готово' : r.status === 'running' ? 'виконується' : r.status === 'undone' ? 'відкочено' : r.status}</span> <span class="sub">${new Date(r.at).toLocaleString('uk')}</span>
+    ${(r.replacements || []).length ? `<div>Заміни: ${r.replacements.map(x => `«${esc(x.from)}» → «${esc(x.to)}»`).join('; ')}</div>` : ''}
+    ${r.instructions ? `<div>Побажання: ${esc(r.instructions)}</div>` : ''}${r.footnotes ? `<div>+ примітки перекладача</div>` : ''}</div>`).join('')}</div>` : ''}`;
+  const sync = () => {
+    el.querySelectorAll('#rows input').forEach(i => { R.rows[+i.dataset.k][i.dataset.f] = i.value; });
+    R.instr = $('#instr').value; R.fn = $('#revfn').checked;
+    const e = revEstimate(p, R.fn, R.instr.trim(), R.rows.filter(r => r.from.trim() && r.to.trim()).length);
+    $('#revest').innerHTML = e ? `Оцінка: <b>${fmt$(e.lo)}–${fmt$(e.hi)}</b> · до ${e.touched} з ${p.segments.length} фрагментів (фрагменти, яких заміни не стосуються, пропускаються безкоштовно)` : '';
+  };
+  el.querySelectorAll('#rows input, #instr, #revfn').forEach(i => i.oninput = i.onchange = sync);
+  el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { sync(); R.rows.splice(+b.dataset.del, 1); if (!R.rows.length) R.rows.push({ from: '', to: '' }); renderRevise(el); });
+  $('#addrow').onclick = () => { sync(); R.rows.push({ from: '', to: '' }); renderRevise(el); };
+  $('#revgo').onclick = async () => {
+    sync();
+    const replacements = R.rows.filter(r => r.from.trim() && r.to.trim());
+    if (!replacements.length && !R.instr.trim() && !R.fn) { alert('Вкажи хоча б одну заміну, побажання або увімкни примітки'); return; }
+    $('#revgo').disabled = true;
+    try { await api('revise', { id: p.id, replacements, instructions: R.instr, footnotes: R.fn }); S.rev = null; await reload(); }
+    catch (e) { alert(e.message); $('#revgo').disabled = false; }
+  };
+  const u = $('#undo'); if (u) u.onclick = async () => {
+    if (!confirm(`Відкотити раунд ${lastDone.n}? Текст і примітки повернуться до стану перед ним.`)) return;
+    try { await api('undo_revision', { id: p.id }); await reload(); } catch (e) { alert(e.message); }
+  };
+  sync();
+}
+
 function renderTab() {
   const el = $('#tabc'), p = S.cur, segs = p.segments || [];
+  if (S.tab === 'revise') return renderRevise(el);
   if (S.tab === 'analysis') {
     if (!p.analysis && !(p.analysis_parts || []).length) { el.innerHTML = `<div class="card sub">Аналіз ще не готовий.</div>`; return; }
     const md = p.analysis || (p.analysis_parts || []).join('\n\n---\n\n');
     if (S.editAnalysis) {
-      el.innerHTML = `<div class="card"><p class="hint">Редагуй markdown. Зміни застосуються до всіх фрагментів, які ще не перекладено (або натисни «Перекласти заново»).</p><textarea id="ana" style="min-height:60vh;font-family:var(--sans);font-size:14px">${esc(md)}</textarea>
+      el.innerHTML = `<div class="card"><p class="hint">Редагуй markdown. Зміни застосуються до всіх фрагментів, які ще не перекладено, і до наступних раундів доредагування.</p><textarea id="ana" style="min-height:60vh;font-family:var(--sans);font-size:14px">${esc(md)}</textarea>
       <div class="bar" style="margin-top:10px"><button class="btn primary" id="saveA">Зберегти</button><button class="btn" id="cancelA">Скасувати</button></div></div>`;
       $('#saveA').onclick = async () => { await api('update', { id: p.id, patch: { analysis: $('#ana').value } }); S.editAnalysis = false; reload(); };
       $('#cancelA').onclick = () => { S.editAnalysis = false; renderTab(); };
@@ -332,47 +417,57 @@ function renderTab() {
     return;
   }
   if (S.tab === 'read') {
-    const parts = segs.map(textOf).filter(Boolean).flat();
-    el.innerHTML = parts.length ? `<div class="card"><div class="reading">${parts.map(t => `<p>${esc(t)}</p>`).join('')}</div></div>` : `<div class="card sub">Переклад ще не готовий.</div>`;
+    const g = globalize(segs);
+    const parts = g.out.filter(Boolean).flat();
+    el.innerHTML = parts.length ? `<div class="card"><div class="reading">${parts.map(t => `<p>${supify(esc(t))}</p>`).join('')}
+      ${g.notes.length ? `<hr style="border:0;border-top:1px solid var(--line);margin:24px 0 10px;width:40%"><div class="fnlist">${g.notes.map(n => `<p><sup>${n.n}</sup> ${esc(n.text)} — <i>Прим. пер.</i></p>`).join('')}</div>` : ''}</div></div>` : `<div class="card sub">Переклад ще не готовий.</div>`;
     return;
   }
   if (S.tab === 'src') { el.innerHTML = `<div class="card"><div class="reading">${p.source.split(/\n\n+/).map(t => `<p>${esc(t)}</p>`).join('')}</div></div>`; return; }
   if (S.tab === 'log') {
     const t = p.tokens || {};
-    el.innerHTML = `<div class="card"><p>Разом: <b>${fmt$(p.cost_usd)}</b> · вхід ${t.input || 0} · вихід ${t.output || 0} · з кешу ${t.cache_read || 0} · запис у кеш ${t.cache_write || 0} · вебпошуків ${t.searches || 0} токенів</p>
+    el.innerHTML = `<div class="card"><p>Разом: <b>${fmt$(p.cost_usd)}</b> · вхід ${t.input || 0} · вихід ${t.output || 0} · з кешу ${t.cache_read || 0} · запис у кеш ${t.cache_write || 0} токенів · вебпошуків ${t.searches || 0}</p>
       <table class="log"><tr><th>Час</th><th>Крок</th><th>сек</th><th>вхід</th><th>вихід</th><th>кеш</th><th>$</th></tr>
       ${(p.log || []).slice().reverse().map(l => `<tr><td>${new Date(l.at).toLocaleTimeString('uk')}</td><td>${esc(l.step)}</td><td>${l.sec}</td><td>${l.input}</td><td>${l.output}</td><td>${l.cache_read}</td><td>${l.usd}</td></tr>`).join('')}</table></div>`;
     return;
   }
   // двомовний
+  S._g = globalize(segs);
   el.innerHTML = `<div class="card" style="padding-top:6px"><div class="bi">${segs.map((s, i) => segHtml(s, i)).join('')}</div></div>`;
   el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => segAction(b.dataset.act, +b.dataset.i));
 }
 
 function segHtml(s, i) {
-  const p = S.cur, t = textOf(s), notes = s.notes || [];
-  const stage = s.user ? 'відредаговано тобою' : s.final ? 'відредаговано' : s.draft ? 'чернетка, чекає редактури' : 'ще не перекладено';
+  const p = S.cur, t = textOf(s), notes = s.notes || [], fn = s.fn || [];
+  const stage = s.user ? 'відредаговано тобою' : s.rev ? `доредаговано (раунд ${s.rev})` : s.final ? 'відредаговано' : s.draft ? 'чернетка, чекає редактури' : 'ще не перекладено';
   const busy = p.status === 'running';
   const head = `<div class="seghead"><b>Фрагмент ${i + 1}</b><span class="chip">${stage}</span><span class="spacer"></span>
     ${!busy && t ? `<button class="btn sm" data-act="edit" data-i="${i}">Редагувати</button>` : ''}
-    ${s.final && s.draft ? `<button class="btn sm ghost" data-act="draft" data-i="${i}">${S.showDraft[i] ? 'Сховати' : 'Показати'} правки редактора</button>` : ''}
+    ${s.final && s.draft ? `<button class="btn sm ghost" data-act="draft" data-i="${i}">${S.showDraft[i] ? 'Сховати' : 'Показати'} зміни від чернетки</button>` : ''}
     ${!busy && s.draft ? `<button class="btn sm ghost" data-act="rereview" data-i="${i}">Повторити редактуру</button>
       <button class="btn sm ghost" data-act="retrans" data-i="${i}">Перекласти заново</button>` : ''}</div>`;
   if (S.editing === i) {
     return head + `<div style="grid-column:1/-1"><textarea class="edit-area" id="ed">${esc((t || []).join('\n\n'))}</textarea>
-      <p class="hint">Абзаци розділяй порожнім рядком (їх має бути ${s.src.length}).</p>
-      <div class="bar"><button class="btn sm primary" data-act="save" data-i="${i}">Зберегти</button><button class="btn sm" data-act="cancel" data-i="${i}">Скасувати</button>${s.user ? `<button class="btn sm ghost" data-act="revert" data-i="${i}">Повернути версію редактора</button>` : ''}</div></div>`;
+      <p class="hint">Абзаци розділяй порожнім рядком (їх має бути ${s.src.length}). Маркер примітки — <code>[^1]</code> одразу після слова.</p>
+      <label>Примітки перекладача цього фрагмента (кожна з нового рядка: <code>1: текст</code>)</label>
+      <textarea class="edit-area" id="edfn" style="min-height:70px;font-family:var(--sans);font-size:14px">${esc(fn.map(f => `${f.id}: ${f.text}`).join('\n'))}</textarea>
+      <div class="bar" style="margin-top:8px"><button class="btn sm primary" data-act="save" data-i="${i}">Зберегти</button><button class="btn sm" data-act="cancel" data-i="${i}">Скасувати</button>${s.user ? `<button class="btn sm ghost" data-act="revert" data-i="${i}">Повернути версію редактора</button>` : ''}</div></div>`;
   }
+  const G = S._g || globalize(S.cur.segments), gt = G.out[i];
+  const fm = new Map(G.notes.map(n => [n.n, n.text]));
   const rows = s.src.map((en, k) => {
     const pn = notes.filter(n => +n.p === k + 1);
-    const uk = t ? (S.showDraft[i] && s.final ? diffHtml(s.draft[k] || '', s.final[k] || '') : esc(t[k] || '')) : '<span class="sub">…</span>';
+    const raw = gt ? (gt[k] || '') : '';
+    const uk = t ? (S.showDraft[i] && s.final ? supify(diffHtml(s.draft[k] || '', textOf(s)[k] || '')) : supify(esc(raw))) : '<span class="sub">…</span>';
+    const pf = [...raw.matchAll(FN_RE)].map(m => +m[1]).filter(id => fm.has(id));
     return `<div class="en">${esc(en)}</div><div class="uk ${pn.some(n => n.doubt) ? 'hasdoubt' : ''}${S.showDraft[i] ? ' diff' : ''}">${uk}</div>
-      ${pn.length ? `<div class="notes">${pn.map(n => `<div class="note ${n.doubt ? 'doubt' : ''}"><span class="t">${esc(n.type || '')}${n.doubt ? ' · перевір' : ''}</span><b>${esc(n.src || '')}</b> → ${esc(n.uk || '')} <span class="sub">· ${esc(n.strategy || '')}</span><div>${esc(n.comment || '')}</div></div>`).join('')}</div>` : ''}`;
+      ${pn.length || pf.length ? `<div class="notes">${pf.map(id => `<div class="note fnote"><span class="t">примітка перекладача ${id}</span>${esc(fm.get(id))}</div>`).join('')}${pn.map(n => `<div class="note ${n.doubt ? 'doubt' : ''}"><span class="t">${esc(n.type || '')}${n.doubt ? ' · перевір' : ''}</span><b>${esc(n.src || '')}</b> → ${esc(n.uk || '')} <span class="sub">· ${esc(n.strategy || '')}</span><div>${esc(n.comment || '')}</div></div>`).join('')}</div>` : ''}`;
   }).join('');
-  return head + rows;
+  const ch = (s.changes || []).length ? `<div class="notes"><div class="note"><span class="t">зміни в раунді ${s.rev}</span>${s.changes.map(esc).join('; ')}</div></div>` : '';
+  return head + rows + ch;
 }
 
-// пословний diff (LCS) для показу правок редактора
+// пословний diff (LCS)
 function diffHtml(a, b) {
   const A = a.split(/(\s+)/), B = b.split(/(\s+)/);
   if (A.length * B.length > 400000) return esc(b);
@@ -401,7 +496,8 @@ async function segAction(a, i) {
       if (parts.length !== n && !confirm(`Абзаців ${parts.length}, а в оригіналі ${n}. Зберегти так? (зайві об'єднаються в останній)`)) return;
       while (parts.length > n) parts[n - 1] += '\n\n' + parts.splice(n, 1)[0];
       while (parts.length < n) parts.push('');
-      await api('update', { id: p.id, segment: i, user: parts }); S.editing = null; return reload();
+      const fn = $('#edfn').value.split('\n').map(l => l.match(/^\s*(\d+)\s*[:.)\-–—]\s*(.+)$/)).filter(Boolean).map(m => ({ id: +m[1], text: m[2].trim() }));
+      await api('update', { id: p.id, segment: i, user: parts, fn }); S.editing = null; return reload();
     }
     if (a === 'revert') { await api('update', { id: p.id, segment: i, user: null }); S.editing = null; return reload(); }
     if (a === 'rereview') { await api('redo', { id: p.id, what: 'review', index: i }); return reload(); }
@@ -411,49 +507,73 @@ async function segAction(a, i) {
 
 // ───────── експорт ─────────
 function exportMenu() {
-  return `<select class="btn sm" id="exp"><option value="">Завантажити…</option><option value="docx">Чистий DOCX (Times New Roman 14, 1,5)</option>
+  return `<select class="btn sm" id="exp"><option value="">Завантажити…</option><option value="docx">Чистий DOCX (Times New Roman 14, 1,5, з виносками)</option>
     <option value="bihtml">Двомовний HTML з поясненнями</option><option value="bidocx">Двомовний DOCX (таблиця)</option><option value="md">Рішення щодо образів і реалій (.md)</option><option value="txt">Переклад (.txt)</option></select>`;
 }
 function wireExport() { const s = $('#exp'); if (s) s.onchange = async () => { const v = s.value; s.value = ''; if (v) try { await doExport(v); } catch (e) { alert(e.message); } }; }
 function save(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 const fileBase = () => (S.cur.title || 'translation').replace(/[\\/:*?"<>|]+/g, '').slice(0, 60);
+const FN_SUFFIX = ' — Прим. пер.';
 
 async function doExport(kind) {
   const p = S.cur, segs = p.segments;
-  const ukParas = segs.flatMap(s => textOf(s) || s.src.map(() => '[не перекладено]'));
-  if (kind === 'txt') return save(fileBase() + ' (UK).txt', new Blob([ukParas.join('\n\n')], { type: 'text/plain;charset=utf-8' }));
+  const g = globalize(segs);
+  const segText = g.out.map((t, i) => t || segs[i].src.map(() => '[не перекладено]'));
+  const ukParas = segText.flat();
+  if (kind === 'txt') {
+    let txt = ukParas.map(t => t.replace(FN_RE, '[$1]')).join('\n\n');
+    if (g.notes.length) txt += '\n\n————————\n' + g.notes.map(n => `[${n.n}] ${n.text}${FN_SUFFIX}`).join('\n');
+    return save(fileBase() + ' (UK).txt', new Blob([txt], { type: 'text/plain;charset=utf-8' }));
+  }
   if (kind === 'md') {
     let md = `# ${p.title} — рішення перекладача\n\n`;
     segs.forEach((s, i) => (s.notes || []).forEach(n => {
       md += `- **[${i + 1}.${n.p}] ${n.type}${n.doubt ? ' ⚠ перевір' : ''}** — «${n.src}» → «${n.uk}» · _${n.strategy}_. ${n.comment}\n`;
     }));
+    if (g.notes.length) md += `\n## Примітки перекладача\n\n` + g.notes.map(n => `${n.n}. ${n.text}`).join('\n') + '\n';
+    const revs = (p.revisions || []).filter(r => r.status === 'done');
+    if (revs.length) md += `\n## Раунди доредагування\n\n` + revs.map(r => `- Раунд ${r.n}: ${(r.replacements || []).map(x => `«${x.from}» → «${x.to}»`).join('; ')}${r.instructions ? ` · ${r.instructions}` : ''}${r.footnotes ? ' · + примітки' : ''}`).join('\n') + '\n';
     md += `\n---\n\n# Перекладацький паспорт тексту\n\n${p.analysis || ''}\n`;
     return save(fileBase() + ' — рішення.md', new Blob([md], { type: 'text/markdown;charset=utf-8' }));
   }
   if (kind === 'bihtml') {
     let rows = '';
-    segs.forEach((s, i) => { const t = textOf(s) || []; s.src.forEach((en, k) => {
+    segs.forEach((s, i) => { const t = segText[i]; s.src.forEach((en, k) => {
       const pn = (s.notes || []).filter(n => +n.p === k + 1);
-      rows += `<tr><td>${esc(en)}</td><td class="${pn.some(n => n.doubt) ? 'd' : ''}">${esc(t[k] || '')}${pn.length ? `<div class="n">${pn.map(n => `<p>${n.doubt ? '⚠ ' : ''}<b>${esc(n.type)}</b>: «${esc(n.src)}» → «${esc(n.uk)}» — <i>${esc(n.strategy)}</i>. ${esc(n.comment)}</p>`).join('')}</div>` : ''}</td></tr>`; }); });
-    const html = `<!doctype html><meta charset="utf-8"><title>${esc(p.title)} — EN|UK</title><style>body{font:16px/1.6 Georgia,serif;max-width:1200px;margin:30px auto;padding:0 16px}table{border-collapse:collapse;width:100%}td{vertical-align:top;border-bottom:1px solid #ddd;padding:8px 10px;width:50%;white-space:pre-wrap}td.d{background:#fff4d1}.n{font:13px/1.45 system-ui,sans-serif;color:#555;margin-top:6px;white-space:normal}.n p{margin:3px 0}</style><h1>${esc(p.title)}</h1><p>${esc(p.author || '')}</p><table>${rows}</table>`;
+      rows += `<tr><td>${esc(en)}</td><td class="${pn.some(n => n.doubt) ? 'd' : ''}">${supify(esc(t[k] || ''))}${pn.length ? `<div class="n">${pn.map(n => `<p>${n.doubt ? '⚠ ' : ''}<b>${esc(n.type)}</b>: «${esc(n.src)}» → «${esc(n.uk)}» — <i>${esc(n.strategy)}</i>. ${esc(n.comment)}</p>`).join('')}</div>` : ''}</td></tr>`; }); });
+    const fnl = g.notes.length ? `<h2>Примітки перекладача</h2><ol class="fn">${g.notes.map(n => `<li>${esc(n.text)}${FN_SUFFIX}</li>`).join('')}</ol>` : '';
+    const html = `<!doctype html><meta charset="utf-8"><title>${esc(p.title)} — EN|UK</title><style>body{font:16px/1.6 Georgia,serif;max-width:1200px;margin:30px auto;padding:0 16px}table{border-collapse:collapse;width:100%}td{vertical-align:top;border-bottom:1px solid #ddd;padding:8px 10px;width:50%;white-space:pre-wrap}td.d{background:#fff4d1}.n{font:13px/1.45 system-ui,sans-serif;color:#555;margin-top:6px;white-space:normal}.n p{margin:3px 0}sup.fn{color:#8a3b12;font-weight:bold}ol.fn{font-size:14px}</style><h1>${esc(p.title)}</h1><p>${esc(p.author || '')}</p><table>${rows}</table>${fnl}`;
     return save(fileBase() + ' — EN-UK.html', new Blob([html], { type: 'text/html;charset=utf-8' }));
   }
   if (!window.docx) await loadScript('https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js');
-  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType } = window.docx;
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, FootnoteReferenceRun } = window.docx;
   const font = 'Times New Roman';
-  const para = (text, opts = {}) => new Paragraph({ spacing: { line: 360 }, indent: opts.noIndent ? undefined : { firstLine: 709 }, alignment: opts.center ? AlignmentType.CENTER : AlignmentType.JUSTIFIED,
-    children: String(text).split('\n').map((line, j) => new TextRun({ text: line, font, size: opts.size || 28, bold: opts.bold, break: j ? 1 : 0 })) });
+  const runs = (text, o) => {
+    const out = [];
+    String(text).split('\n').forEach((line, j) => {
+      const bits = line.split(/(\[\^\d+\])/);
+      bits.forEach((b, q) => {
+        const m = b.match(/^\[\^(\d+)\]$/);
+        if (m && o.fn) out.push(new FootnoteReferenceRun(+m[1]));
+        else if (!m && (b || q === 0)) out.push(new TextRun({ text: b, font, size: o.size || 28, bold: o.bold, break: j && q === 0 ? 1 : 0 }));
+      });
+    });
+    return out;
+  };
+  const para = (text, opts = {}) => new Paragraph({ spacing: { line: 360 }, indent: opts.noIndent ? undefined : { firstLine: 709 }, alignment: opts.center ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, children: runs(text, opts) });
+  const footnotes = {};
+  g.notes.forEach(n => { footnotes[n.n] = { children: [new Paragraph({ alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: n.text + FN_SUFFIX, font, size: 20 })] })] }; });
   let children;
   if (kind === 'docx') {
-    children = [para(p.title, { center: true, bold: true, noIndent: true }), ...(p.author ? [para(p.author, { center: true, noIndent: true })] : []), para('', { noIndent: true }), ...ukParas.map(t => para(t))];
+    children = [para(p.title, { center: true, bold: true, noIndent: true }), ...(p.author ? [para(p.author, { center: true, noIndent: true })] : []), para('', { noIndent: true }), ...ukParas.map(t => para(t, { fn: true }))];
   } else {
     const rows = [];
-    segs.forEach(s => { const t = textOf(s) || []; s.src.forEach((en, k) => rows.push(new TableRow({ children: [
+    segs.forEach((s, i) => { const t = segText[i]; s.src.forEach((en, k) => rows.push(new TableRow({ children: [
       new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [para(en, { noIndent: true, size: 24 })] }),
-      new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [para(t[k] || '', { noIndent: true, size: 24 })] })] }))); });
+      new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [para(t[k] || '', { noIndent: true, size: 24, fn: true })] })] }))); });
     children = [para(p.title, { center: true, bold: true, noIndent: true }), new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows })];
   }
-  const doc = new Document({ styles: { default: { document: { run: { font, size: 28 } } } },
+  const doc = new Document({ footnotes, styles: { default: { document: { run: { font, size: 28 } } } },
     sections: [{ properties: { page: { margin: { top: 1134, bottom: 1134, left: 1701, right: 850 } } }, children }] });
   save(fileBase() + (kind === 'docx' ? ' (UK).docx' : ' — EN-UK.docx'), await Packer.toBlob(doc));
 }
@@ -461,7 +581,7 @@ async function doExport(kind) {
 // ───────── дані й опитування ─────────
 async function refreshList() { try { S.list = await api('list'); } catch (e) { console.error(e); } }
 async function openProject(id) {
-  S.view = 'project'; S.editing = null; S.editAnalysis = false; S.showDraft = {};
+  S.view = 'project'; S.editing = null; S.editAnalysis = false; S.showDraft = {}; S.rev = null;
   try { S.cur = await api('get', { id }); } catch (e) { alert(e.message); return; }
   if (S.cur.status === 'waiting_approval') S.tab = 'analysis';
   render(); startPoll();
