@@ -523,24 +523,73 @@ function revisionNeedsSegment(rev, seg) {
   const hay = (curText(seg).join(" ") + " " + seg.src.join(" ")).toLowerCase();
   return (rev.replacements || []).some((r) => r.from && hay.includes(stemOf(r.from)));
 }
-async function stepRevise(p, i, rev) {
-  const seg = p.segments[i];
-  const n = seg.src.length;
-  const segs = [...p.segments];
-  if (!revisionNeedsSegment(rev, seg)) {
-    segs[i] = { ...seg, rev: rev.n };
-    p.segments = segs;
-    await patch(p.id, { segments: segs });
-    return;
-  }
-  const repl = (rev.replacements || []).filter((r2) => r2.from && r2.to).map((r2) => `\u2013 \xAB${r2.from}\xBB \u2192 \xAB${r2.to}\xBB`).join("\n");
+function requestsBlock(rev) {
+  const repl = (rev.replacements || []).filter((r) => r.from && r.to).map((r) => `\u2013 \xAB${r.from}\xBB \u2192 \xAB${r.to}\xBB`).join("\n");
+  return `<client_requests>
+${repl ? `\u0417\u0410\u041C\u0406\u041D\u0418 \u0412 \u0423\u0421\u042C\u041E\u041C\u0423 \u0422\u0415\u041A\u0421\u0422\u0406:
+${repl}
+` : ""}${(rev.instructions || "").trim() ? `\u041F\u041E\u0411\u0410\u0416\u0410\u041D\u041D\u042F:
+${rev.instructions.trim()}
+` : ""}\u041F\u0420\u0418\u041C\u0406\u0422\u041A\u0418 \u041F\u0415\u0420\u0415\u041A\u041B\u0410\u0414\u0410\u0427\u0410: ${rev.footnotes ? "\u0434\u043E\u0434\u0430\u0442\u0438 \u043F\u043E\u0442\u0440\u0456\u0431\u043D\u0456 \u0439 \u043E\u043D\u043E\u0432\u0438\u0442\u0438 \u043D\u0430\u044F\u0432\u043D\u0456" : "\u043D\u0430\u044F\u0432\u043D\u0456 \u043D\u0435 \u0437\u043C\u0456\u043D\u044E\u0432\u0430\u0442\u0438, \u043D\u043E\u0432\u0438\u0445 \u043D\u0435 \u0434\u043E\u0434\u0430\u0432\u0430\u0442\u0438"}
+</client_requests>`;
+}
+var EDIT_RULES = `\u2022 \u0417\u0430\u043C\u0456\u043D\u0438 \u0437\u0430\u0441\u0442\u043E\u0441\u043E\u0432\u0443\u044E\u0442\u044C\u0441\u044F \u0432 \u0443\u0441\u0456\u0445 \u0433\u0440\u0430\u043C\u0430\u0442\u0438\u0447\u043D\u0438\u0445 \u0444\u043E\u0440\u043C\u0430\u0445 (\u0432\u0456\u0434\u043C\u0456\u043D\u043A\u0438, \u0447\u0438\u0441\u043B\u043E, \u0440\u0456\u0434, \u043F\u043E\u0445\u0456\u0434\u043D\u0456 \u0441\u043B\u043E\u0432\u0430) \u0437 \u0443\u0437\u0433\u043E\u0434\u0436\u0435\u043D\u043D\u044F\u043C \u043F\u0440\u0438\u043A\u043C\u0435\u0442\u043D\u0438\u043A\u0456\u0432, \u0437\u0430\u0439\u043C\u0435\u043D\u043D\u0438\u043A\u0456\u0432, \u0434\u0456\u0454\u0441\u043B\u0456\u0432. \u0417\u0430\u043C\u0456\u043D\u044E\u0454\u0442\u044C\u0441\u044F \u0441\u0430\u043C\u0435 \u0446\u0435 \u0441\u043B\u043E\u0432\u043E/\u043F\u043E\u043D\u044F\u0442\u0442\u044F, \u0430 \u043D\u0435 \u0432\u0438\u043F\u0430\u0434\u043A\u043E\u0432\u0456 \u0437\u0431\u0456\u0433\u0438 \u0447\u0430\u0441\u0442\u0438\u043D \u0456\u043D\u0448\u0438\u0445 \u0441\u043B\u0456\u0432. \u042F\u043A\u0449\u043E \u043B\u0456\u0432\u0430 \u0447\u0430\u0441\u0442\u0438\u043D\u0430 \u0437\u0430\u043C\u0456\u043D\u0438 \u0430\u043D\u0433\u043B\u0456\u0439\u0441\u044C\u043A\u0430 \u2014 \u0437\u0430\u043C\u0456\u043D\u044E\u0454\u0442\u044C\u0441\u044F \u0442\u0435, \u044F\u043A \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0435\u043D\u043E \u0446\u0435 \u0441\u043B\u043E\u0432\u043E \u043E\u0440\u0438\u0433\u0456\u043D\u0430\u043B\u0443.
+\u2022 \u041F\u043E\u0431\u0430\u0436\u0430\u043D\u043D\u044F \u0437\u0430\u0441\u0442\u043E\u0441\u043E\u0432\u0443\u044E\u0442\u044C\u0441\u044F \u043B\u0438\u0448\u0435 \u0442\u0430\u043C, \u0434\u0435 \u0432\u043E\u043D\u0438 \u0441\u043F\u0440\u0430\u0432\u0434\u0456 \u0441\u0442\u043E\u0441\u0443\u044E\u0442\u044C\u0441\u044F \u0442\u0435\u043A\u0441\u0442\u0443.
+\u2022 \u0423\u0441\u0435, \u0449\u043E \u043D\u0435 \u0441\u0442\u043E\u0441\u0443\u0454\u0442\u044C\u0441\u044F \u043F\u0440\u0430\u0432\u043E\u043A, \u043B\u0438\u0448\u0430\u0454\u0442\u044C\u0441\u044F \u0434\u043E\u0441\u043B\u0456\u0432\u043D\u043E (\u0446\u0435 \u0432\u0438\u0447\u0438\u0442\u0430\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442; \u0447\u0430\u0441\u0442\u0438\u043D\u0443 \u043F\u0440\u0430\u0432\u043E\u043A \u0443 \u043D\u044C\u043E\u043C\u0443 \u0432\u043D\u0456\u0441 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447-\u043B\u044E\u0434\u0438\u043D\u0430).
+\u2022 \u041F\u0456\u0441\u043B\u044F \u0437\u043C\u0456\u043D \u0442\u0435\u043A\u0441\u0442 \u043C\u0430\u0454 \u043B\u0438\u0448\u0430\u0442\u0438\u0441\u044F \u043F\u0440\u0438\u0440\u043E\u0434\u043D\u043E\u044E \u0443\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u043E\u044E, \u0443 \u0441\u0442\u0438\u043B\u0456 \u0430\u0432\u0442\u043E\u0440\u0430, \u0437\u0430 \u043D\u043E\u0440\u043C\u0430\u043C\u0438 \u043F\u0430\u0441\u043F\u043E\u0440\u0442\u0430 \u0439 \u043F\u0440\u0430\u0432\u043E\u043F\u0438\u0441\u0443 2019.`;
+async function stepInterpret(p, rev) {
   const t0 = Date.now();
   const r = await callClaude({
     model: p.model,
     effort: effortFor(p, p.effort),
-    maxTokens: 24e3,
+    maxTokens: 16e3,
     system: translationSystem(p),
-    user: `${prevContext(p, i)}${rev.footnotes ? explainedSoFar(p, i) : ""}\u0422\u0438 \u2014 \u0433\u043E\u043B\u043E\u0432\u043D\u0438\u0439 \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440 \u0432\u0438\u0434\u0430\u0432\u043D\u0438\u0446\u0442\u0432\u0430. \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434 \u0443\u0436\u0435 \u0433\u043E\u0442\u043E\u0432\u0438\u0439 \u0456 \u0432\u0438\u0447\u0438\u0442\u0430\u043D\u0438\u0439; \u0442\u0435\u043F\u0435\u0440 \u0442\u0440\u0435\u0431\u0430 \u0432\u043D\u0435\u0441\u0442\u0438 \u0432 \u043D\u044C\u043E\u0433\u043E \u043F\u0440\u0430\u0432\u043A\u0438 \u0437\u0430\u043C\u043E\u0432\u043D\u0438\u043A\u0430 (\u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447\u0430). \u041F\u0435\u0440\u0435\u0434 \u0442\u043E\u0431\u043E\u044E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 ${i + 1} \u0437 ${p.segments.length}.
+    user: `\u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434 \u0446\u044C\u043E\u0433\u043E \u0442\u0435\u043A\u0441\u0442\u0443 \u0433\u043E\u0442\u043E\u0432\u0438\u0439. \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447 \u0445\u043E\u0447\u0435 \u0432\u043D\u0435\u0441\u0442\u0438 \u0432 \u043D\u044C\u043E\u0433\u043E \u043F\u0440\u0430\u0432\u043A\u0438:
+
+${requestsBlock(rev)}
+
+\u041F\u0435\u0440\u0448 \u043D\u0456\u0436 \u0449\u043E\u0441\u044C \u0437\u043C\u0456\u043D\u044E\u0432\u0430\u0442\u0438, \u043F\u043E\u044F\u0441\u043D\u0438 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447\u0435\u0432\u0456, \u044F\u043A \u0442\u0438 \u0440\u043E\u0437\u0443\u043C\u0456\u0454\u0448 \u043A\u043E\u0436\u043D\u0435 \u043F\u043E\u0431\u0430\u0436\u0430\u043D\u043D\u044F, \u0449\u043E\u0431 \u0432\u0456\u043D \u043C\u0456\u0433 \u0432\u0438\u043F\u0440\u0430\u0432\u0438\u0442\u0438 \u0442\u0432\u043E\u0454 \u0440\u043E\u0437\u0443\u043C\u0456\u043D\u043D\u044F. \u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u043E\u044E, \u0441\u0442\u0438\u0441\u043B\u043E, \u043C\u0430\u0440\u043A\u043E\u0432\u0430\u043D\u0438\u043C \u0441\u043F\u0438\u0441\u043A\u043E\u043C:
+- \u0434\u043B\u044F \u043A\u043E\u0436\u043D\u043E\u0457 \u0437\u0430\u043C\u0456\u043D\u0438: \u044F\u043A\u0456 \u0444\u043E\u0440\u043C\u0438 \u0441\u043B\u043E\u0432\u0430 \u0431\u0443\u0434\u0443\u0442\u044C \u0437\u043C\u0456\u043D\u0435\u043D\u0456 (\u043F\u0440\u0438\u043A\u043B\u0430\u0434\u0438 \u0432\u0456\u0434\u043C\u0456\u043D\u043A\u0456\u0432), \u0449\u043E \u0437\u043C\u0456\u043D\u0438\u0442\u044C\u0441\u044F \u0432 \u0443\u0437\u0433\u043E\u0434\u0436\u0435\u043D\u043D\u0456 (\u0440\u0456\u0434/\u0447\u0438\u0441\u043B\u043E \u043F\u0440\u0438\u043A\u043C\u0435\u0442\u043D\u0438\u043A\u0456\u0432 \u0456 \u0434\u0456\u0454\u0441\u043B\u0456\u0432), \u0447\u0438 \u0454 \u043C\u0456\u0441\u0446\u044F, \u0434\u0435 \u0437\u0430\u043C\u0456\u043D\u0430 \u043D\u0435\u0434\u043E\u0440\u0435\u0447\u043D\u0430 (\u0456\u043D\u0448\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u043D\u044F \u0441\u043B\u043E\u0432\u0430) \u0456 \u0449\u043E \u0442\u0438 \u0437 \u043D\u0438\u043C\u0438 \u0440\u043E\u0431\u0438\u0442\u0438\u043C\u0435\u0448;
+- \u0434\u043B\u044F \u043A\u043E\u0436\u043D\u043E\u0433\u043E \u043F\u043E\u0431\u0430\u0436\u0430\u043D\u043D\u044F: \u0449\u043E \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u043E \u0442\u0438 \u0437\u043C\u0456\u043D\u044E\u0432\u0430\u0442\u0438\u043C\u0435\u0448, \u0434\u0435 (\u044F\u043A\u0456 \u043F\u0435\u0440\u0441\u043E\u043D\u0430\u0436\u0456/\u0435\u043F\u0456\u0437\u043E\u0434\u0438/\u0442\u0438\u043F\u0438 \u0440\u0435\u0447\u0435\u043D\u044C), \u0430 \u0447\u043E\u0433\u043E \u041D\u0415 \u0447\u0456\u043F\u0430\u0442\u0438\u043C\u0435\u0448;
+${rev.footnotes ? "- \u0434\u043B\u044F \u043F\u0440\u0438\u043C\u0456\u0442\u043E\u043A: \u044F\u043A\u0456 \u0440\u0435\u0430\u043B\u0456\u0457, \u0442\u0435\u0440\u043C\u0456\u043D\u0438, \u0430\u043B\u044E\u0437\u0456\u0457 \u0442\u0438 \u043F\u043B\u0430\u043D\u0443\u0454\u0448 \u043F\u043E\u044F\u0441\u043D\u0438\u0442\u0438 (\u043F\u0435\u0440\u0435\u043B\u0456\u043A) \u0456 \u0437\u0430 \u044F\u043A\u0438\u043C \u043F\u0440\u0438\u043D\u0446\u0438\u043F\u043E\u043C \u0432\u0456\u0434\u0431\u0438\u0440\u0430\u0442\u0438\u043C\u0435\u0448;\n" : ""}- \u044F\u043A\u0449\u043E \u0449\u043E\u0441\u044C \u0434\u0432\u043E\u0437\u043D\u0430\u0447\u043D\u0435 \u2014 \u043D\u0430\u0437\u0432\u0438 \u0441\u0432\u043E\u0454 \u043F\u0440\u0438\u043F\u0443\u0449\u0435\u043D\u043D\u044F.
+\u041D\u0435 \u043D\u0430\u0432\u043E\u0434\u044C \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0435\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442 \u043F\u043E\u0432\u043D\u0456\u0441\u0442\u044E. \u0412\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C \u2014 \u043B\u0438\u0448\u0435 \u0446\u0435\u0439 \u0441\u043F\u0438\u0441\u043E\u043A, \u0431\u0435\u0437 \u0432\u0441\u0442\u0443\u043F\u0443.`,
+    onText: (full) => {
+      patch(p.id, { progress: full.slice(-5e3) }).catch(() => {
+      });
+    }
+  });
+  const revs = p.revisions.map((x) => x.n === rev.n ? { ...x, understanding: r.text.trim(), phase: "plan" } : x);
+  p.revisions = revs;
+  await patch(p.id, { revisions: revs, progress: null, ...await addCost(p, p.model, r.usage, `rev${rev.n}:understand`, Date.now() - t0) });
+}
+function plannedFootnotesSoFar(p, i) {
+  const list = p.segments.slice(0, i).flatMap((s) => [
+    ...(s.fn || []).map((f) => "\u2013 " + String(f.text).slice(0, 120)),
+    ...(s.plan?.items || []).filter((it) => it.type === "footnote_add").map((it) => `\u2013 ${it.anchor}: ${String(it.text).slice(0, 120)}`)
+  ]);
+  return list.length ? `<already_footnoted>
+\u0423 \u043F\u043E\u043F\u0435\u0440\u0435\u0434\u043D\u0456\u0445 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430\u0445 \u0443\u0436\u0435 \u0454 (\u0430\u0431\u043E \u0437\u0430\u043F\u043B\u0430\u043D\u043E\u0432\u0430\u043D\u0456) \u0442\u0430\u043A\u0456 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438 \u2014 \u043D\u0435 \u043F\u043E\u0432\u0442\u043E\u0440\u044E\u0439 \u0457\u0445:
+${list.slice(-60).join("\n")}
+</already_footnoted>
+
+` : "";
+}
+async function stepPlan(p, i, rev) {
+  const seg = p.segments[i];
+  const segs = [...p.segments];
+  if (!revisionNeedsSegment(rev, seg)) {
+    segs[i] = { ...seg, plan: { rev: rev.n, items: [] } };
+    p.segments = segs;
+    await patch(p.id, { segments: segs });
+    return;
+  }
+  const t0 = Date.now();
+  const r = await callClaude({
+    model: p.model,
+    effort: effortFor(p, p.effort),
+    maxTokens: 2e4,
+    system: translationSystem(p),
+    user: `${rev.footnotes ? plannedFootnotesSoFar(p, i) : ""}\u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434 \u0433\u043E\u0442\u043E\u0432\u0438\u0439; \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447 \u0445\u043E\u0447\u0435 \u0432\u043D\u0435\u0441\u0442\u0438 \u043F\u0440\u0430\u0432\u043A\u0438. \u0422\u0438 \u041D\u0415 \u0432\u043D\u043E\u0441\u0438\u0448 \u0457\u0445 \u0437\u0430\u0440\u0430\u0437, \u0430 \u0441\u043A\u043B\u0430\u0434\u0430\u0454\u0448 \u0442\u043E\u0447\u043D\u0438\u0439 \u043F\u043B\u0430\u043D \u043F\u0440\u0430\u0432\u043E\u043A \u0434\u043B\u044F \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 ${i + 1} \u0437 ${p.segments.length}. \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447 \u043F\u0435\u0440\u0435\u0433\u043B\u044F\u043D\u0435 \u043F\u043B\u0430\u043D, \u0432\u0438\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0456 \u0437\u0430\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044C; \u043F\u043E\u0442\u0456\u043C \u043F\u0440\u0430\u0432\u043A\u0438 \u0431\u0443\u0434\u0435 \u0437\u0430\u0441\u0442\u043E\u0441\u043E\u0432\u0430\u043D\u043E \u043C\u0435\u0445\u0430\u043D\u0456\u0447\u043D\u043E, \u0442\u043E\u043C\u0443 \u0442\u043E\u0447\u043D\u0456\u0441\u0442\u044C \u0446\u0438\u0442\u0430\u0442 \u043A\u0440\u0438\u0442\u0438\u0447\u043D\u0430.
 
 <source>
 ${numbered(seg.src)}
@@ -554,50 +603,157 @@ ${(seg.fn || []).length ? `
 ${JSON.stringify(seg.fn)}
 </current_footnotes>
 ` : ""}
-<client_requests>
-${repl ? `\u0417\u0410\u041C\u0406\u041D\u0418 \u0412 \u0423\u0421\u042C\u041E\u041C\u0423 \u0422\u0415\u041A\u0421\u0422\u0406:
-${repl}
-` : ""}${(rev.instructions || "").trim() ? `\u041F\u041E\u0411\u0410\u0416\u0410\u041D\u041D\u042F:
-${rev.instructions.trim()}
-` : ""}\u041F\u0420\u0418\u041C\u0406\u0422\u041A\u0418 \u041F\u0415\u0420\u0415\u041A\u041B\u0410\u0414\u0410\u0427\u0410: ${rev.footnotes ? "\u0434\u043E\u0434\u0430\u0439 \u043F\u043E\u0442\u0440\u0456\u0431\u043D\u0456 \u0439 \u043E\u043D\u043E\u0432\u0438 \u043D\u0430\u044F\u0432\u043D\u0456 \u0437\u0430 \u043F\u0440\u0430\u0432\u0438\u043B\u0430\u043C\u0438 \u043D\u0438\u0436\u0447\u0435" : "\u043D\u0430\u044F\u0432\u043D\u0456 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438 \u0437\u0431\u0435\u0440\u0435\u0436\u0438 \u0431\u0435\u0437 \u0437\u043C\u0456\u043D, \u043D\u043E\u0432\u0438\u0445 \u043D\u0435 \u0434\u043E\u0434\u0430\u0432\u0430\u0439"}
-</client_requests>
+${requestsBlock(rev)}
 
-\u041F\u0440\u0430\u0432\u0438\u043B\u0430 \u0432\u043D\u0435\u0441\u0435\u043D\u043D\u044F \u043F\u0440\u0430\u0432\u043E\u043A:
-\u2022 \u0417\u0430\u043C\u0456\u043D\u0438 \u0437\u0430\u0441\u0442\u043E\u0441\u043E\u0432\u0443\u0439 \u0432 \u0443\u0441\u0456\u0445 \u0433\u0440\u0430\u043C\u0430\u0442\u0438\u0447\u043D\u0438\u0445 \u0444\u043E\u0440\u043C\u0430\u0445 (\u0432\u0456\u0434\u043C\u0456\u043D\u043A\u0438, \u0447\u0438\u0441\u043B\u043E, \u0440\u0456\u0434, \u043F\u0440\u0438\u0441\u0432\u0456\u0439\u043D\u0456 \u043F\u0440\u0438\u043A\u043C\u0435\u0442\u043D\u0438\u043A\u0438, \u043F\u043E\u0445\u0456\u0434\u043D\u0456 \u0441\u043B\u043E\u0432\u0430) \u0456 \u0443\u0437\u0433\u043E\u0434\u0436\u0443\u0439 \u0437 \u043D\u0438\u043C\u0438 \u043F\u0440\u0438\u043A\u043C\u0435\u0442\u043D\u0438\u043A\u0438, \u0437\u0430\u0439\u043C\u0435\u043D\u043D\u0438\u043A\u0438, \u0434\u0456\u0454\u0441\u043B\u043E\u0432\u0430. \u0417\u0430\u043C\u0456\u043D\u044E\u0439 \u0441\u0430\u043C\u0435 \u0446\u0435 \u0441\u043B\u043E\u0432\u043E/\u043F\u043E\u043D\u044F\u0442\u0442\u044F, \u0430 \u043D\u0435 \u0432\u0438\u043F\u0430\u0434\u043A\u043E\u0432\u0456 \u0437\u0431\u0456\u0433\u0438 \u0447\u0430\u0441\u0442\u0438\u043D \u0456\u043D\u0448\u0438\u0445 \u0441\u043B\u0456\u0432. \u042F\u043A\u0449\u043E \u043B\u0456\u0432\u0430 \u0447\u0430\u0441\u0442\u0438\u043D\u0430 \u0437\u0430\u043C\u0456\u043D\u0438 \u0430\u043D\u0433\u043B\u0456\u0439\u0441\u044C\u043A\u0430 \u2014 \u0437\u0430\u043C\u0456\u043D\u0438 \u0442\u0435, \u044F\u043A \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0435\u043D\u043E \u0446\u0435 \u0441\u043B\u043E\u0432\u043E \u043E\u0440\u0438\u0433\u0456\u043D\u0430\u043B\u0443.
-\u2022 \u041F\u043E\u0431\u0430\u0436\u0430\u043D\u043D\u044F \u0437\u0430\u0441\u0442\u043E\u0441\u043E\u0432\u0443\u0439 \u043B\u0438\u0448\u0435 \u0442\u0430\u043C, \u0434\u0435 \u0432\u043E\u043D\u0438 \u0441\u0442\u043E\u0441\u0443\u044E\u0442\u044C\u0441\u044F \u0446\u044C\u043E\u0433\u043E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430. \u042F\u043A\u0449\u043E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 \u043D\u0456\u0447\u043E\u0433\u043E \u043D\u0435 \u0441\u0442\u043E\u0441\u0443\u0454\u0442\u044C\u0441\u044F \u2014 \u043F\u043E\u0432\u0435\u0440\u043D\u0438 \u0442\u0435\u043A\u0441\u0442 \u0431\u0435\u0437 \u0437\u043C\u0456\u043D.
-\u2022 \u0423\u0441\u0435, \u0449\u043E \u043D\u0435 \u0441\u0442\u043E\u0441\u0443\u0454\u0442\u044C\u0441\u044F \u043F\u0440\u0430\u0432\u043E\u043A, \u0437\u0430\u043B\u0438\u0448 \u0434\u043E\u0441\u043B\u0456\u0432\u043D\u043E \u044F\u043A \u0454 (\u0446\u0435 \u0432\u0436\u0435 \u0432\u0438\u0447\u0438\u0442\u0430\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442; \u0447\u0430\u0441\u0442\u0438\u043D\u0443 \u043F\u0440\u0430\u0432\u043E\u043A \u0443 \u043D\u044C\u043E\u043C\u0443 \u0432\u043D\u0456\u0441 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447-\u043B\u044E\u0434\u0438\u043D\u0430 \u2014 \u0457\u0445 \u043D\u0435 \u0447\u0456\u043F\u0430\u0439).
-\u2022 \u041F\u0456\u0441\u043B\u044F \u0437\u043C\u0456\u043D \u0442\u0435\u043A\u0441\u0442 \u043C\u0430\u0454 \u043B\u0438\u0448\u0430\u0442\u0438\u0441\u044F \u043F\u0440\u0438\u0440\u043E\u0434\u043D\u043E\u044E \u0443\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u043E\u044E, \u0443 \u0441\u0442\u0438\u043B\u0456 \u0430\u0432\u0442\u043E\u0440\u0430, \u0437\u0430 \u043D\u043E\u0440\u043C\u0430\u043C\u0438 \u043F\u0430\u0441\u043F\u043E\u0440\u0442\u0430 \u0439 \u043F\u0440\u0430\u0432\u043E\u043F\u0438\u0441\u0443 2019.
+<approved_understanding>
+\u0417\u0430\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043D\u0435 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447\u0435\u043C \u0440\u043E\u0437\u0443\u043C\u0456\u043D\u043D\u044F \u043F\u043E\u0431\u0430\u0436\u0430\u043D\u044C (\u043E\u0431\u043E\u0432'\u044F\u0437\u043A\u043E\u0432\u0435):
+${rev.understanding || "(\u043D\u0435\u043C\u0430\u0454)"}
+</approved_understanding>
+
+\u041F\u0440\u0430\u0432\u0438\u043B\u0430:
+${EDIT_RULES}
 ${rev.footnotes ? `
 ${FOOTNOTE_RULES}
 ` : ""}
-\u0414\u0430\u0439 \u0432\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C \u0420\u0406\u0412\u041D\u041E \u0443 \u0444\u043E\u0440\u043C\u0430\u0442\u0456:
-<final>
-[[1]] \u0442\u0435\u043A\u0441\u0442 \u043F\u0435\u0440\u0448\u043E\u0433\u043E \u0430\u0431\u0437\u0430\u0446\u0443 (\u0437 \u043C\u0430\u0440\u043A\u0435\u0440\u0430\u043C\u0438 [^k], \u044F\u043A\u0449\u043E \u0454 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438)
-\u2026
-[[${n}]] \u2026
-</final>
-<footnotes>
-[\u043F\u043E\u0432\u043D\u0438\u0439 JSON-\u043C\u0430\u0441\u0438\u0432 \u043F\u0440\u0438\u043C\u0456\u0442\u043E\u043A \u0446\u044C\u043E\u0433\u043E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 \u043F\u0456\u0441\u043B\u044F \u043F\u0440\u0430\u0432\u043E\u043A: {"id": k, "text": "..."}; [] \u044F\u043A\u0449\u043E \u043F\u0440\u0438\u043C\u0456\u0442\u043E\u043A \u043D\u0435\u043C\u0430\u0454]
-</footnotes>
-<changes>
-[JSON-\u043C\u0430\u0441\u0438\u0432 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0445 \u043E\u043F\u0438\u0441\u0456\u0432 \u0437\u0440\u043E\u0431\u043B\u0435\u043D\u0438\u0445 \u0437\u043C\u0456\u043D, \u043D\u0430\u043F\u0440\u0438\u043A\u043B\u0430\u0434 "\u0430\u0431\u0437. 2: \xAB\u043F\u0435\u043D\u043D\u0456\xBB \u2192 \xAB\u0446\u0435\u043D\u0442\u0438\xBB (3 \u0440\u0430\u0437\u0438)"; [] \u044F\u043A\u0449\u043E \u0437\u043C\u0456\u043D \u043D\u0435\u043C\u0430\u0454]
-</changes>`,
+\u0424\u043E\u0440\u043C\u0430\u0442 \u043A\u043E\u0436\u043D\u043E\u0457 \u043F\u0440\u0430\u0432\u043A\u0438 (JSON):
+\u2022 {"p": \u043D\u043E\u043C\u0435\u0440 \u0430\u0431\u0437\u0430\u0446\u0443, "type": "edit", "before": "\u0422\u041E\u0427\u041D\u0410 \u0446\u0438\u0442\u0430\u0442\u0430 \u0437 \u043F\u043E\u0442\u043E\u0447\u043D\u043E\u0433\u043E \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0443 (\u0441\u0438\u043C\u0432\u043E\u043B \u0443 \u0441\u0438\u043C\u0432\u043E\u043B, \u043C\u0456\u043D\u0456\u043C\u0430\u043B\u044C\u043D\u0430, \u0430\u043B\u0435 \u043E\u0434\u043D\u043E\u0437\u043D\u0430\u0447\u043D\u0430 \u0432 \u043C\u0435\u0436\u0430\u0445 \u0430\u0431\u0437\u0430\u0446\u0443; \u0446\u0456\u043B\u0456 \u0441\u043B\u043E\u0432\u0430)", "after": "\u0447\u0438\u043C \u0437\u0430\u043C\u0456\u043D\u0438\u0442\u0438 \u0446\u044E \u0446\u0438\u0442\u0430\u0442\u0443", "reason": "\u043A\u043E\u0440\u043E\u0442\u043A\u043E \u0447\u043E\u043C\u0443"}
+${rev.footnotes ? `\u2022 {"p": \u043D\u043E\u043C\u0435\u0440 \u0430\u0431\u0437\u0430\u0446\u0443, "type": "footnote_add", "anchor": "\u0422\u041E\u0427\u041D\u0415 \u0441\u043B\u043E\u0432\u043E \u0447\u0438 \u0432\u0438\u0441\u043B\u0456\u0432 \u0437 \u0442\u0435\u043A\u0441\u0442\u0443 (\u043F\u0456\u0441\u043B\u044F \u0440\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u044C), \u043F\u0456\u0441\u043B\u044F \u044F\u043A\u043E\u0433\u043E \u0441\u0442\u0430\u043D\u0435 \u043C\u0430\u0440\u043A\u0435\u0440", "text": "\u0442\u0435\u043A\u0441\u0442 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438", "reason": "\u0447\u043E\u043C\u0443 \u0431\u0435\u0437 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438 \u043D\u0435 \u043E\u0431\u0456\u0439\u0442\u0438\u0441\u044F"}
+\u2022 {"type": "footnote_edit", "id": \u043D\u043E\u043C\u0435\u0440 \u043D\u0430\u044F\u0432\u043D\u043E\u0457 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438, "text": "\u043D\u043E\u0432\u0438\u0439 \u0442\u0435\u043A\u0441\u0442", "reason": "..."}
+\u2022 {"type": "footnote_delete", "id": \u043D\u043E\u043C\u0435\u0440 \u043D\u0430\u044F\u0432\u043D\u043E\u0457 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438, "reason": "..."}
+` : ""}\u041D\u0435 \u0434\u0440\u043E\u0431\u0438 \u043E\u0434\u043D\u0443 \u0437\u043C\u0456\u043D\u0443 \u043D\u0430 \u043A\u0456\u043B\u044C\u043A\u0430 \u043F\u0440\u0430\u0432\u043E\u043A \u0456 \u043D\u0435 \u043E\u0431'\u0454\u0434\u043D\u0443\u0439 \u0434\u0430\u043B\u0435\u043A\u0456 \u043C\u0456\u0441\u0446\u044F \u0432 \u043E\u0434\u043D\u0443. \u042F\u043A\u0449\u043E \u0443 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0456 \u043D\u0435\u043C\u0430 \u0447\u043E\u0433\u043E \u043C\u0456\u043D\u044F\u0442\u0438 \u2014 \u043F\u043E\u0440\u043E\u0436\u043D\u0456\u0439 \u043C\u0430\u0441\u0438\u0432.
+
+\u0412\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C \u0420\u0406\u0412\u041D\u041E \u0443 \u0444\u043E\u0440\u043C\u0430\u0442\u0456:
+<plan>
+[ ...JSON-\u043C\u0430\u0441\u0438\u0432 \u043F\u0440\u0430\u0432\u043E\u043A... ]
+</plan>`,
     onText: (full) => {
       patch(p.id, { progress: full.slice(-5e3) }).catch(() => {
       });
     }
   });
-  const block = between(r.text, "final");
-  const paras = block ? parseParas(block, n) : null;
-  if (!paras) throw new Error("\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u0440\u043E\u0437\u0456\u0431\u0440\u0430\u0442\u0438 \u0434\u043E\u0440\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 " + (i + 1));
-  const old = curText(seg);
-  for (let k = 0; k < n; k++) if (!paras[k]) paras[k] = old[k] || "";
-  const fnRaw = between(r.text, "footnotes") !== null ? parseFootnotes(between(r.text, "footnotes")) : seg.fn || [];
-  const fx = fixFootnotes(paras, fnRaw);
-  const history = [...seg.history || [], { rev: rev.n, final: seg.final ?? null, user: seg.user ?? null, fn: seg.fn ?? [], prevRev: seg.rev || 0 }].slice(-10);
-  segs[i] = { ...seg, final: fx.paras, user: null, fn: fx.fn, rev: rev.n, changes: parseNotes(between(r.text, "changes")).map(String), history };
+  const items = parseNotes(between(r.text, "plan")).filter((it) => it && ["edit", "footnote_add", "footnote_edit", "footnote_delete"].includes(it.type)).map((it, k) => ({ ...it, k, on: true }));
+  segs[i] = { ...seg, plan: { rev: rev.n, items } };
   p.segments = segs;
-  await patch(p.id, { segments: segs, progress: null, ...await addCost(p, p.model, r.usage, `revise${rev.n}:${i + 1}`, Date.now() - t0) });
+  await patch(p.id, { segments: segs, progress: null, ...await addCost(p, p.model, r.usage, `rev${rev.n}:plan${i + 1}`, Date.now() - t0) });
+}
+function applyPlan(seg, items) {
+  const paras = [...curText(seg)];
+  let fn = [...seg.fn || []].map((f) => ({ ...f }));
+  const failed = [], done = [];
+  let tmp = 900;
+  for (const it of items.filter((x) => x.on !== false && x.type === "edit")) {
+    const k = (+it.p || 0) - 1;
+    const par = paras[k];
+    if (par == null || !it.before) {
+      failed.push(it);
+      continue;
+    }
+    const at = par.indexOf(it.before);
+    if (at < 0) {
+      failed.push(it);
+      continue;
+    }
+    paras[k] = par.slice(0, at) + (it.after ?? "") + par.slice(at + it.before.length);
+    done.push(`\u0430\u0431\u0437. ${k + 1}: \xAB${it.before}\xBB \u2192 \xAB${it.after}\xBB`);
+  }
+  for (const it of items.filter((x) => x.on !== false && x.type === "footnote_add")) {
+    const k = (+it.p || 0) - 1;
+    const par = paras[k];
+    if (par == null || !it.anchor || !it.text) {
+      failed.push(it);
+      continue;
+    }
+    const at = par.indexOf(it.anchor);
+    if (at < 0) {
+      failed.push(it);
+      continue;
+    }
+    const id = ++tmp, pos = at + it.anchor.length;
+    paras[k] = par.slice(0, pos) + `[^${id}]` + par.slice(pos);
+    fn.push({ id, text: it.text });
+    done.push(`\u0430\u0431\u0437. ${k + 1}: \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0430 \u0434\u043E \xAB${it.anchor}\xBB`);
+  }
+  for (const it of items.filter((x) => x.on !== false && x.type === "footnote_edit")) {
+    const f = fn.find((x) => x.id === +it.id);
+    if (f && it.text) {
+      f.text = it.text;
+      done.push(`\u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0430 ${it.id}: \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0442\u0435\u043A\u0441\u0442`);
+    } else failed.push(it);
+  }
+  for (const it of items.filter((x) => x.on !== false && x.type === "footnote_delete")) {
+    if (fn.some((x) => x.id === +it.id)) {
+      fn = fn.filter((x) => x.id !== +it.id);
+      done.push(`\u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0430 ${it.id}: \u0432\u0438\u0434\u0430\u043B\u0435\u043D\u043E`);
+    } else failed.push(it);
+  }
+  const fx = fixFootnotes(paras, fn);
+  return { paras: fx.paras, fn: fx.fn, failed, done };
+}
+function describeItem(it) {
+  if (it.type === "edit") return `\u0430\u0431\u0437. ${it.p}: \u0437\u0430\u043C\u0456\u043D\u0438\u0442\u0438 \xAB${it.before}\xBB \u043D\u0430 \xAB${it.after}\xBB`;
+  if (it.type === "footnote_add") return `\u0430\u0431\u0437. ${it.p}: \u0434\u043E\u0434\u0430\u0442\u0438 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0443 \u043F\u0456\u0441\u043B\u044F \xAB${it.anchor}\xBB: \xAB${it.text}\xBB`;
+  if (it.type === "footnote_edit") return `\u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0443 ${it.id} \u0437\u0430\u043C\u0456\u043D\u0438\u0442\u0438 \u0442\u0435\u043A\u0441\u0442\u043E\u043C: \xAB${it.text}\xBB`;
+  return `\u0432\u0438\u0434\u0430\u043B\u0438\u0442\u0438 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0443 ${it.id}`;
+}
+async function stepApply(p, i, rev) {
+  const seg = p.segments[i];
+  const n = seg.src.length;
+  const segs = [...p.segments];
+  const items = (seg.plan?.rev === rev.n ? seg.plan.items : []) || [];
+  const active = items.filter((x) => x.on !== false);
+  if (!active.length) {
+    segs[i] = { ...seg, rev: rev.n, plan: null };
+    p.segments = segs;
+    await patch(p.id, { segments: segs });
+    return;
+  }
+  const history = [...seg.history || [], { rev: rev.n, final: seg.final ?? null, user: seg.user ?? null, fn: seg.fn ?? [], prevRev: seg.rev || 0 }].slice(-10);
+  const res = applyPlan(seg, active);
+  let paras = res.paras, fn = res.fn, changes = res.done;
+  if (res.failed.length) {
+    const t0 = Date.now();
+    const r = await callClaude({
+      model: p.model,
+      effort: effortFor(p, p.effort),
+      maxTokens: 2e4,
+      system: translationSystem(p),
+      user: `\u0412\u043D\u0435\u0441\u0438 \u0432 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 ${i + 1} \u0420\u0406\u0412\u041D\u041E \u0446\u0456 \u0437\u0430\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043D\u0456 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447\u0435\u043C \u043F\u0440\u0430\u0432\u043A\u0438 \u2014 \u0456 \u043D\u0456\u0447\u043E\u0433\u043E \u0431\u0456\u043B\u044C\u0448\u0435. \u0414\u043E\u0441\u043B\u0456\u0432\u043D\u0456 \u0446\u0438\u0442\u0430\u0442\u0438 \u043C\u043E\u0433\u043B\u0438 \u0442\u0440\u043E\u0445\u0438 \u0440\u043E\u0437\u0456\u0439\u0442\u0438\u0441\u044F \u0437 \u0442\u0435\u043A\u0441\u0442\u043E\u043C: \u0437\u043D\u0430\u0439\u0434\u0438 \u0432\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u043D\u0435 \u043C\u0456\u0441\u0446\u0435 \u0437\u0430 \u0437\u043C\u0456\u0441\u0442\u043E\u043C.
+
+<current_translation>
+${numbered(paras)}
+</current_translation>
+<current_footnotes>
+${JSON.stringify(fn)}
+</current_footnotes>
+
+<approved_edits>
+${res.failed.map((it) => "\u2013 " + describeItem(it)).join("\n")}
+</approved_edits>
+
+\u041C\u0430\u0440\u043A\u0435\u0440 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438 \u2014 [^k] \u043E\u0434\u0440\u0430\u0437\u0443 \u043F\u0456\u0441\u043B\u044F \u0441\u043B\u043E\u0432\u0430. \u0420\u0435\u0448\u0442\u0443 \u0442\u0435\u043A\u0441\u0442\u0443 \u043B\u0438\u0448\u0438 \u0434\u043E\u0441\u043B\u0456\u0432\u043D\u043E; \u0443\u0437\u0433\u043E\u0434\u044C \u0433\u0440\u0430\u043C\u0430\u0442\u0438\u043A\u0443 \u043B\u0438\u0448\u0435 \u0432 \u043C\u0456\u0441\u0446\u044F\u0445 \u043F\u0440\u0430\u0432\u043E\u043A.
+\u0412\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u044C \u0420\u0406\u0412\u041D\u041E \u0443 \u0444\u043E\u0440\u043C\u0430\u0442\u0456:
+<final>
+[[1]] \u2026
+[[${n}]] \u2026
+</final>
+<footnotes>
+[\u043F\u043E\u0432\u043D\u0438\u0439 JSON-\u043C\u0430\u0441\u0438\u0432 \u043F\u0440\u0438\u043C\u0456\u0442\u043E\u043A \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430: {"id": k, "text": "..."}]
+</footnotes>`
+    });
+    const block = between(r.text, "final");
+    const mp = block ? parseParas(block, n) : null;
+    if (mp) {
+      for (let k = 0; k < n; k++) if (!mp[k]) mp[k] = paras[k];
+      const fx = fixFootnotes(mp, parseFootnotes(between(r.text, "footnotes")));
+      paras = fx.paras;
+      fn = fx.fn;
+      changes = [...changes, ...res.failed.map((it) => describeItem(it) + " (\u0432\u043D\u0435\u0441\u0435\u043D\u043E \u043C\u043E\u0434\u0435\u043B\u043B\u044E)")];
+    } else changes = [...changes, ...res.failed.map((it) => "\u041D\u0415 \u0412\u041D\u0415\u0421\u0415\u041D\u041E: " + describeItem(it))];
+    Object.assign(p, await addCost(p, p.model, r.usage, `rev${rev.n}:apply${i + 1}`, Date.now() - t0));
+  }
+  segs[i] = { ...seg, final: paras, user: null, fn, rev: rev.n, changes, history, plan: null };
+  p.segments = segs;
+  await patch(p.id, { segments: segs, progress: null, cost_usd: p.cost_usd, tokens: p.tokens, log: p.log });
 }
 function revisionNote(rev) {
   const repl = (rev.replacements || []).filter((r) => r.from && r.to).map((r) => `\xAB${r.from}\xBB \u2192 \xAB${r.to}\xBB`).join("; ");
@@ -609,6 +765,8 @@ function revisionNote(rev) {
 ## \u0420\u0456\u0448\u0435\u043D\u043D\u044F \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0430\u0447\u0430 (\u0440\u0430\u0443\u043D\u0434 \u0434\u043E\u0440\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F ${rev.n})
 ${repl ? `- \u041E\u0431\u043E\u0432'\u044F\u0437\u043A\u043E\u0432\u0456 \u0437\u0430\u043C\u0456\u043D\u0438: ${repl}
 ` : ""}${(rev.instructions || "").trim() ? `- \u041F\u043E\u0431\u0430\u0436\u0430\u043D\u043D\u044F: ${rev.instructions.trim()}
+` : ""}${rev.understanding ? `- \u0417\u0430\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043D\u0435 \u0440\u043E\u0437\u0443\u043C\u0456\u043D\u043D\u044F:
+${rev.understanding.split("\n").map((l) => "  " + l).join("\n")}
 ` : ""}<!-- /rev:${rev.n} -->`;
 }
 function nextStep(p) {
@@ -622,12 +780,19 @@ function nextStep(p) {
   }
   const rev = (p.revisions || []).find((r) => r.status === "running");
   if (rev) {
-    for (let i = 0; i < p.segments.length; i++) if ((p.segments[i].rev || 0) < rev.n) return { kind: "revise", i, n: rev.n };
+    const phase = rev.phase || "interpret";
+    if (phase === "interpret") return { kind: "interpret", i: 0, n: rev.n };
+    if (phase === "plan") {
+      for (let i = 0; i < p.segments.length; i++) if (p.segments[i].plan?.rev !== rev.n) return { kind: "plan", i, n: rev.n };
+      return { kind: "planned", i: 0, n: rev.n };
+    }
+    if (phase === "review") return { kind: "wait_rev", i: 0, n: rev.n };
+    for (let i = 0; i < p.segments.length; i++) if ((p.segments[i].rev || 0) < rev.n) return { kind: "apply", i, n: rev.n };
     return { kind: "revdone", i: 0, n: rev.n };
   }
   return { kind: "done", i: 0 };
 }
-var stepLabel = (s, p) => s.kind === "revise" ? `\u0414\u043E\u0440\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F (\u0440\u0430\u0443\u043D\u0434 ${s.n}): \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 ${s.i + 1}/${p.segments.length}` : s.kind === "analyze" ? `\u0410\u043D\u0430\u043B\u0456\u0437 \u0442\u0435\u043A\u0441\u0442\u0443: ${ANALYSIS_PARTS[s.i].title}` : s.kind === "translate" ? `\u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 ${s.i + 1}/${p.segments.length}` : s.kind === "review" ? `\u0420\u0435\u0434\u0430\u043A\u0442\u0443\u0440\u0430 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 ${s.i + 1}/${p.segments.length}` : s.kind;
+var stepLabel = (s, p) => s.kind === "interpret" ? `\u0414\u043E\u0440\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F (\u0440\u0430\u0443\u043D\u0434 ${s.n}): \u043E\u0441\u043C\u0438\u0441\u043B\u044E\u044E \u043F\u043E\u0431\u0430\u0436\u0430\u043D\u043D\u044F` : s.kind === "plan" ? `\u0414\u043E\u0440\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F (\u0440\u0430\u0443\u043D\u0434 ${s.n}): \u043F\u043B\u0430\u043D \u043F\u0440\u0430\u0432\u043E\u043A, \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 ${s.i + 1}/${p.segments.length}` : s.kind === "apply" ? `\u0414\u043E\u0440\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F (\u0440\u0430\u0443\u043D\u0434 ${s.n}): \u0432\u043D\u043E\u0448\u0443 \u0437\u0430\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043D\u0456 \u043F\u0440\u0430\u0432\u043A\u0438, \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 ${s.i + 1}/${p.segments.length}` : s.kind === "analyze" ? `\u0410\u043D\u0430\u043B\u0456\u0437 \u0442\u0435\u043A\u0441\u0442\u0443: ${ANALYSIS_PARTS[s.i].title}` : s.kind === "translate" ? `\u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 ${s.i + 1}/${p.segments.length}` : s.kind === "review" ? `\u0420\u0435\u0434\u0430\u043A\u0442\u0443\u0440\u0430 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 ${s.i + 1}/${p.segments.length}` : s.kind;
 async function kickNext(id) {
   try {
     await fetch(SELF_URL, { method: "POST", headers: { "content-type": "application/json", "x-app-key": await appKey() }, body: JSON.stringify({ action: "run", id }) });
@@ -652,6 +817,15 @@ async function worker(id) {
   }
   if (s.kind === "done") {
     await patch(id, { status: "done", step: null, progress: null, busy_until: null, cur: {} });
+    return;
+  }
+  if (s.kind === "planned") {
+    const revs = p.revisions.map((r) => r.n === s.n ? { ...r, phase: "review" } : r);
+    await patch(id, { revisions: revs, status: "waiting_revision", step: null, progress: null, busy_until: null, cur: {} });
+    return;
+  }
+  if (s.kind === "wait_rev") {
+    await patch(id, { status: "waiting_revision", step: null, busy_until: null });
     return;
   }
   if (s.kind === "revdone") {
@@ -682,7 +856,9 @@ async function worker(id) {
   try {
     if (s.kind === "analyze") await stepAnalyze(p, s.i);
     else if (s.kind === "translate") await stepTranslate(p, s.i);
-    else if (s.kind === "revise") await stepRevise(p, s.i, (p.revisions || []).find((r) => r.n === s.n));
+    else if (s.kind === "interpret") await stepInterpret(p, p.revisions.find((r) => r.n === s.n));
+    else if (s.kind === "plan") await stepPlan(p, s.i, p.revisions.find((r) => r.n === s.n));
+    else if (s.kind === "apply") await stepApply(p, s.i, p.revisions.find((r) => r.n === s.n));
     else await stepReview(p, s.i);
     await stopHb();
     await patch(id, { busy_until: null, cur: {} });
@@ -817,15 +993,62 @@ Deno.serve(async (req) => {
         const footnotes = !!b.footnotes;
         if (!replacements.length && !instructions && !footnotes) return json({ error: "\u0412\u043A\u0430\u0436\u0438 \u0437\u0430\u043C\u0456\u043D\u0438, \u043F\u043E\u0431\u0430\u0436\u0430\u043D\u043D\u044F \u0430\u0431\u043E \u0443\u0432\u0456\u043C\u043A\u043D\u0438 \u043F\u0440\u0438\u043C\u0456\u0442\u043A\u0438" }, 400);
         const n = Math.max(0, ...(p.revisions || []).map((r) => r.n || 0)) + 1;
-        const revisions = [...p.revisions || [], { n, at: (/* @__PURE__ */ new Date()).toISOString(), replacements, instructions, footnotes, status: "running" }];
+        if ((p.revisions || []).some((r) => r.status === "running")) return json({ error: "\u0404 \u043D\u0435\u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u0439 \u0440\u0430\u0443\u043D\u0434 \u2014 \u0437\u0430\u0442\u0432\u0435\u0440\u0434\u0438 \u0430\u0431\u043E \u0441\u043A\u0430\u0441\u0443\u0439 \u0439\u043E\u0433\u043E" }, 409);
+        const revisions = [...p.revisions || [], { n, at: (/* @__PURE__ */ new Date()).toISOString(), replacements, instructions, footnotes, status: "running", phase: "interpret" }];
         await patch(b.id, { revisions, status: "running", error: null, cur: {} });
         return json({ n, started: await startRun(b.id) });
+      }
+      case "revision_save":
+      // зберегти твої правки розуміння/плану, нічого не запускаючи
+      case "revision_approve":
+      case "revision_replan": {
+        const { data: p } = await db.from("lt_projects").select("status,segments,revisions").eq("id", b.id).single();
+        if (!p) return json({ error: "not found" }, 404);
+        const rev = (p.revisions || []).find((r) => r.status === "running");
+        if (!rev) return json({ error: "\u041D\u0435\u043C\u0430\u0454 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0433\u043E \u0440\u0430\u0443\u043D\u0434\u0443" }, 400);
+        if (p.status === "running") return json({ error: "\u0417\u0430\u0447\u0435\u043A\u0430\u0439, \u043F\u043B\u0430\u043D \u0449\u0435 \u0441\u043A\u043B\u0430\u0434\u0430\u0454\u0442\u044C\u0441\u044F" }, 409);
+        const segs = [...p.segments];
+        if (b.items && typeof b.items === "object") {
+          for (const [k, list] of Object.entries(b.items)) {
+            const i = +k;
+            if (!segs[i] || !Array.isArray(list)) continue;
+            segs[i] = { ...segs[i], plan: { rev: rev.n, items: list.slice(0, 300) } };
+          }
+        }
+        let r2 = { ...rev };
+        if (typeof b.understanding === "string") r2.understanding = b.understanding.slice(0, 2e4);
+        if (typeof b.extra === "string" && b.extra.trim()) r2.instructions = ((r2.instructions || "") + "\n\u0423\u0442\u043E\u0447\u043D\u0435\u043D\u043D\u044F: " + b.extra.trim()).trim();
+        let status = "waiting_revision";
+        if (b.action === "revision_approve") {
+          r2.phase = "apply";
+          status = "running";
+        }
+        if (b.action === "revision_replan") {
+          r2.phase = b.reinterpret ? "interpret" : "plan";
+          status = "running";
+          for (let i = 0; i < segs.length; i++) segs[i] = { ...segs[i], plan: null };
+        }
+        const revisions = p.revisions.map((r) => r.n === rev.n ? r2 : r);
+        await patch(b.id, { segments: segs, revisions, status, error: null, cur: {} });
+        return json({ ok: true, started: status === "running" ? await startRun(b.id) : false });
+      }
+      case "revision_cancel": {
+        const { data: p } = await db.from("lt_projects").select("status,segments,revisions").eq("id", b.id).single();
+        if (!p) return json({ error: "not found" }, 404);
+        const rev = (p.revisions || []).find((r) => r.status === "running");
+        if (!rev) return json({ error: "\u041D\u0435\u043C\u0430\u0454 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0433\u043E \u0440\u0430\u0443\u043D\u0434\u0443" }, 400);
+        if (rev.phase === "apply") return json({ error: "\u041F\u0440\u0430\u0432\u043A\u0438 \u0432\u0436\u0435 \u0432\u043D\u043E\u0441\u044F\u0442\u044C\u0441\u044F \u2014 \u0434\u043E\u0447\u0435\u043A\u0430\u0439\u0441\u044F \u0456 \u0432\u0456\u0434\u043A\u043E\u0442\u0438 \u0440\u0430\u0443\u043D\u0434" }, 409);
+        const segs = p.segments.map((s) => ({ ...s, plan: null }));
+        const revisions = p.revisions.map((r) => r.n === rev.n ? { ...r, status: "cancelled" } : r);
+        await patch(b.id, { segments: segs, revisions, status: "done", step: null, progress: null, error: null });
+        return json({ ok: true });
       }
       case "undo_revision": {
         const { data: p } = await db.from("lt_projects").select("*").eq("id", b.id).single();
         if (!p) return json({ error: "not found" }, 404);
         if (p.status === "running") return json({ error: "\u0421\u043F\u0435\u0440\u0448\u0443 \u0437\u0443\u043F\u0438\u043D\u0438 \u0440\u043E\u0431\u043E\u0442\u0443" }, 409);
-        const last = [...p.revisions || []].reverse().find((r) => r.status === "done" || r.status === "running");
+        if ((p.revisions || []).some((r) => r.status === "running")) return json({ error: "\u0421\u043F\u0435\u0440\u0448\u0443 \u0437\u0430\u0442\u0432\u0435\u0440\u0434\u0438 \u0430\u0431\u043E \u0441\u043A\u0430\u0441\u0443\u0439 \u043F\u043E\u0442\u043E\u0447\u043D\u0438\u0439 \u0440\u0430\u0443\u043D\u0434" }, 409);
+        const last = [...p.revisions || []].reverse().find((r) => r.status === "done");
         if (!last) return json({ error: "\u041D\u0435\u043C\u0430\u0454 \u0440\u0430\u0443\u043D\u0434\u0456\u0432 \u0434\u043B\u044F \u0432\u0456\u0434\u043A\u0430\u0442\u0443" }, 400);
         const segs = p.segments.map((s) => {
           const h = [...s.history || []];
