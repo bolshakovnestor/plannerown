@@ -340,9 +340,37 @@ function translationSystem(p: any) {
 }
 function prevContext(p: any, i: number) {
   const prev = (p.segments as any[]).slice(Math.max(0, i - 2), i)
-    .map((s) => (s.user || s.final || s.draft || []).join("\n\n")).join("\n\n");
+    .map((s) => stripFn((s.user || s.final || s.draft || []).join("\n\n"))).join("\n\n");
   return prev ? `<previous_translation>\n(Останні вже перекладені фрагменти — для зв'язності, тону й узгодженості імен. Не перекладай їх повторно.)\n${prev}\n</previous_translation>\n\n` : "";
 }
+
+// ───────────────────────── Примітки перекладача ─────────────────────────
+const FOOTNOTE_RULES = `ПРИМІТКИ ПЕРЕКЛАДАЧА (виноски внизу сторінки):
+• Додавай примітку лише там, де без неї сучасний український читач не зрозуміє важливого для сенсу і де це не можна природно передати в самому тексті: транслітеровані реалії, історичні постаті й події, установи, гроші й ціни епохи, спеціальні терміни, алюзії й цитати, гра слів, яку не вдалося відтворити (коротко — що було в оригіналі).
+• Не пояснюй очевидного і того, що зрозуміло з контексту. Не дублюй пояснень, які вже були в попередніх фрагментах (список нижче).
+• Позначай місце маркером [^k] одразу після слова, до розділового знака (наприклад: «бакалійника[^1],»). k — номер у межах цього фрагмента, від 1.
+• Текст примітки: 1–3 речення, енциклопедично точний, у стилі приміток перекладача в українських виданнях, без слів «Прим. пер.» (їх додасть верстка). Лише перевірені факти; якщо не впевнений у факті — примітку не пиши.
+• Орієнтир: 0–3 примітки на фрагмент; часто правильна кількість — нуль.`;
+
+const stripFn = (t: string) => t.replace(/\[\^\d+\]/g, "");
+function fixFootnotes(paras: string[], raw: any[]): { paras: string[]; fn: { id: number; text: string }[] } {
+  const notes = new Map<number, string>();
+  for (const f of raw || []) { const id = +f?.id; if (id > 0 && f?.text) notes.set(id, String(f.text).trim()); }
+  const used = new Set<number>();
+  const out = paras.map((t) => (t || "").replace(/\[\^(\d+)\]/g, (m, d) => { const id = +d; if (notes.has(id) && !used.has(id)) { used.add(id); return m; } return ""; }));
+  // перенумеровуємо 1..n у порядку появи
+  const order: number[] = []; out.join("\n").replace(/\[\^(\d+)\]/g, (_m, d) => { order.push(+d); return ""; });
+  const map = new Map(order.map((id, k) => [id, k + 1]));
+  return {
+    paras: out.map((t) => t.replace(/\[\^(\d+)\]/g, (_m, d) => `[^${map.get(+d)}]`)),
+    fn: order.map((id) => ({ id: map.get(id)!, text: notes.get(id)! })),
+  };
+}
+function explainedSoFar(p: any, i: number) {
+  const list = (p.segments as any[]).slice(0, i).flatMap((s) => (s.fn || []).map((f: any) => "– " + String(f.text).slice(0, 140)));
+  return list.length ? `<already_footnoted>\nУ попередніх фрагментах уже є такі примітки — не повторюй їх:\n${list.slice(-60).join("\n")}\n</already_footnoted>\n\n` : "";
+}
+function parseFootnotes(s: string | null): any[] { return parseNotes(s); }
 
 async function stepTranslate(p: any, i: number) {
   const seg = p.segments[i];
@@ -397,7 +425,7 @@ ${numbered(seg.draft)}
 5. Узгодженість імен, реалій і термінів з паспортом і попередніми фрагментами.
 6. Образність: кожна метафора, порівняння, ідіома, гра слів, алюзія — чи вдало передано; за потреби запропонуй сильніше рішення.
 Виправляй лише те, що справді поліпшує текст; добре — не чіпай.
-
+${p.footnotes ? `\n${FOOTNOTE_RULES}\n\n${explainedSoFar(p, i)}` : ""}
 Дай відповідь РІВНО у форматі:
 <final>
 [[1]] остаточний текст першого абзацу
@@ -407,7 +435,10 @@ ${numbered(seg.draft)}
 <notes>
 [JSON-масив рішень, які варто знати перекладачеві: кожна метафора/ідіома/гра слів/алюзія/реалія/ім'я цього фрагмента, а також кожне сумнівне місце. Формат елемента:
 {"p": номер абзацу, "type": "metaphor|simile|idiom|wordplay|allusion|realia|name|term|accuracy|style|doubt", "src": "фрагмент оригіналу", "uk": "як перекладено", "strategy": "збереження образу|заміна образу|перефразування|компенсація|транскрипція|калька|описовий переклад|генералізація|конкретизація|функціональний відповідник|опущення|—", "comment": "коротке обґрунтування (1–2 речення)", "doubt": true якщо рішення сумнівне і людині варто перевірити, інакше false}]
-</notes>`,
+</notes>${p.footnotes ? `
+<footnotes>
+[JSON-масив приміток перекладача для маркерів [^k] у тексті: {"id": k, "text": "текст примітки"}; порожній масив [], якщо приміток немає]
+</footnotes>` : ""}`,
     onText: (full) => { patch(p.id, { progress: full.slice(-5000) }).catch(() => {}); },
   });
   const block = between(r.text, "final");
@@ -415,12 +446,88 @@ ${numbered(seg.draft)}
   if (!paras) throw new Error("Не вдалося розібрати редактуру фрагмента " + (i + 1));
   for (let k = 0; k < n; k++) if (!paras[k]) paras[k] = seg.draft[k]; // страховка
   const notes = parseNotes(between(r.text, "notes"));
-  const segs = [...p.segments]; segs[i] = { ...seg, final: paras, notes };
+  const fx = fixFootnotes(paras, p.footnotes ? parseFootnotes(between(r.text, "footnotes")) : []);
+  const segs = [...p.segments]; segs[i] = { ...seg, final: fx.paras, fn: fx.fn, notes };
   p.segments = segs;
   await patch(p.id, { segments: segs, progress: null, ...(await addCost(p, p.model, r.usage, `review:${i + 1}`, Date.now() - t0)) });
 }
 
-function nextStep(p: any): { kind: string; i: number } | null {
+// ───────────────────────── Доредагування за побажаннями ─────────────────────────
+const curText = (s: any): string[] => s.user || s.final || s.draft || [];
+function stemOf(w: string) { const t = w.trim().toLowerCase(); return t.length > 5 ? t.slice(0, t.length - 2) : t; }
+function revisionNeedsSegment(rev: any, seg: any) {
+  if ((rev.instructions || "").trim() || rev.footnotes) return true;
+  const hay = (curText(seg).join(" ") + " " + seg.src.join(" ")).toLowerCase();
+  return (rev.replacements || []).some((r: any) => r.from && hay.includes(stemOf(r.from)));
+}
+
+async function stepRevise(p: any, i: number, rev: any) {
+  const seg = p.segments[i];
+  const n = seg.src.length;
+  const segs = [...p.segments];
+  if (!revisionNeedsSegment(rev, seg)) { // у фрагменті нема що міняти — без виклику моделі
+    segs[i] = { ...seg, rev: rev.n }; p.segments = segs;
+    await patch(p.id, { segments: segs });
+    return;
+  }
+  const repl = (rev.replacements || []).filter((r: any) => r.from && r.to)
+    .map((r: any) => `– «${r.from}» → «${r.to}»`).join("\n");
+  const t0 = Date.now();
+  const r = await callClaude({
+    model: p.model, effort: effortFor(p, p.effort), maxTokens: 24000, system: translationSystem(p),
+    user: `${prevContext(p, i)}${rev.footnotes ? explainedSoFar(p, i) : ""}Ти — головний редактор видавництва. Переклад уже готовий і вичитаний; тепер треба внести в нього правки замовника (перекладача). Перед тобою фрагмент ${i + 1} з ${p.segments.length}.
+
+<source>
+${numbered(seg.src)}
+</source>
+
+<current_translation>
+${numbered(curText(seg))}
+</current_translation>
+${(seg.fn || []).length ? `\n<current_footnotes>\n${JSON.stringify(seg.fn)}\n</current_footnotes>\n` : ""}
+<client_requests>
+${repl ? `ЗАМІНИ В УСЬОМУ ТЕКСТІ:\n${repl}\n` : ""}${(rev.instructions || "").trim() ? `ПОБАЖАННЯ:\n${rev.instructions.trim()}\n` : ""}ПРИМІТКИ ПЕРЕКЛАДАЧА: ${rev.footnotes ? "додай потрібні й онови наявні за правилами нижче" : "наявні примітки збережи без змін, нових не додавай"}
+</client_requests>
+
+Правила внесення правок:
+• Заміни застосовуй в усіх граматичних формах (відмінки, число, рід, присвійні прикметники, похідні слова) і узгоджуй з ними прикметники, займенники, дієслова. Замінюй саме це слово/поняття, а не випадкові збіги частин інших слів. Якщо ліва частина заміни англійська — заміни те, як перекладено це слово оригіналу.
+• Побажання застосовуй лише там, де вони стосуються цього фрагмента. Якщо фрагмента нічого не стосується — поверни текст без змін.
+• Усе, що не стосується правок, залиш дослівно як є (це вже вичитаний текст; частину правок у ньому вніс перекладач-людина — їх не чіпай).
+• Після змін текст має лишатися природною українською, у стилі автора, за нормами паспорта й правопису 2019.
+${rev.footnotes ? `\n${FOOTNOTE_RULES}\n` : ""}
+Дай відповідь РІВНО у форматі:
+<final>
+[[1]] текст першого абзацу (з маркерами [^k], якщо є примітки)
+…
+[[${n}]] …
+</final>
+<footnotes>
+[повний JSON-масив приміток цього фрагмента після правок: {"id": k, "text": "..."}; [] якщо приміток немає]
+</footnotes>
+<changes>
+[JSON-масив коротких описів зроблених змін, наприклад "абз. 2: «пенні» → «центи» (3 рази)"; [] якщо змін немає]
+</changes>`,
+    onText: (full) => { patch(p.id, { progress: full.slice(-5000) }).catch(() => {}); },
+  });
+  const block = between(r.text, "final");
+  const paras = block ? parseParas(block, n) : null;
+  if (!paras) throw new Error("Не вдалося розібрати доредагування фрагмента " + (i + 1));
+  const old = curText(seg);
+  for (let k = 0; k < n; k++) if (!paras[k]) paras[k] = old[k] || "";
+  const fnRaw = between(r.text, "footnotes") !== null ? parseFootnotes(between(r.text, "footnotes")) : (seg.fn || []);
+  const fx = fixFootnotes(paras, fnRaw);
+  const history = [...(seg.history || []), { rev: rev.n, final: seg.final ?? null, user: seg.user ?? null, fn: seg.fn ?? [], prevRev: seg.rev || 0 }].slice(-10);
+  segs[i] = { ...seg, final: fx.paras, user: null, fn: fx.fn, rev: rev.n, changes: parseNotes(between(r.text, "changes")).map(String), history };
+  p.segments = segs;
+  await patch(p.id, { segments: segs, progress: null, ...(await addCost(p, p.model, r.usage, `revise${rev.n}:${i + 1}`, Date.now() - t0)) });
+}
+
+function revisionNote(rev: any) {
+  const repl = (rev.replacements || []).filter((r: any) => r.from && r.to).map((r: any) => `«${r.from}» → «${r.to}»`).join("; ");
+  return `\n\n---\n\n<!-- rev:${rev.n} -->\n## Рішення перекладача (раунд доредагування ${rev.n})\n${repl ? `- Обов'язкові заміни: ${repl}\n` : ""}${(rev.instructions || "").trim() ? `- Побажання: ${rev.instructions.trim()}\n` : ""}<!-- /rev:${rev.n} -->`;
+}
+
+function nextStep(p: any): { kind: string; i: number; n?: number } | null {
   const parts = p.analysis_parts || [];
   for (let k = 0; k < ANALYSIS_PARTS.length; k++) if (!parts[k]) return { kind: "analyze", i: k };
   if (!p.analysis) return { kind: "join", i: 0 };
@@ -429,9 +536,15 @@ function nextStep(p: any): { kind: string; i: number } | null {
     if (!p.segments[i].draft) return { kind: "translate", i };
     if (!p.segments[i].final) return { kind: "review", i };
   }
+  const rev = (p.revisions || []).find((r: any) => r.status === "running");
+  if (rev) {
+    for (let i = 0; i < p.segments.length; i++) if ((p.segments[i].rev || 0) < rev.n) return { kind: "revise", i, n: rev.n };
+    return { kind: "revdone", i: 0, n: rev.n };
+  }
   return { kind: "done", i: 0 };
 }
-const stepLabel = (s: { kind: string; i: number }, p: any) =>
+const stepLabel = (s: { kind: string; i: number; n?: number }, p: any) =>
+  s.kind === "revise" ? `Доредагування (раунд ${s.n}): фрагмент ${s.i + 1}/${p.segments.length}` :
   s.kind === "analyze" ? `Аналіз тексту: ${ANALYSIS_PARTS[s.i].title}` :
   s.kind === "translate" ? `Переклад фрагмента ${s.i + 1}/${p.segments.length}` :
   s.kind === "review" ? `Редактура фрагмента ${s.i + 1}/${p.segments.length}` : s.kind;
@@ -449,8 +562,14 @@ async function worker(id: string) {
   if (!s) { await patch(id, { status: "waiting_approval", busy_until: null, step: null }); return; }
   if (s.kind === "join") { await patch(id, { analysis: p.analysis_parts.join("\n\n---\n\n"), busy_until: null }); return kickNext(id); }
   if (s.kind === "done") { await patch(id, { status: "done", step: null, progress: null, busy_until: null, cur: {} }); return; }
+  if (s.kind === "revdone") {
+    const revs = (p.revisions || []).map((r: any) => r.n === s.n ? { ...r, status: "done", done_at: new Date().toISOString() } : r);
+    const rev = revs.find((r: any) => r.n === s.n);
+    await patch(id, { revisions: revs, analysis: (p.analysis || "") + revisionNote(rev), status: "done", step: null, progress: null, busy_until: null, cur: {} });
+    return;
+  }
 
-  const key = `${s.kind}:${s.i}`;
+  const key = `${s.kind}:${s.n ?? ""}:${s.i}`;
   const attempts = p.cur?.key === key ? (p.cur.attempts || 0) + 1 : 1;
   if (attempts > 4) {
     await patch(id, { status: "error", error: `Крок «${stepLabel(s, p)}» обривався 4 рази поспіль (ліміт часу або мережа). Спробуй модель Sonnet або нижчий effort і натисни «Продовжити».`, busy_until: null });
@@ -468,6 +587,7 @@ async function worker(id: string) {
   try {
     if (s.kind === "analyze") await stepAnalyze(p, s.i);
     else if (s.kind === "translate") await stepTranslate(p, s.i);
+    else if (s.kind === "revise") await stepRevise(p, s.i, (p.revisions || []).find((r: any) => r.n === s.n));
     else await stepReview(p, s.i);
     await stopHb();
     await patch(id, { busy_until: null, cur: {} });
@@ -523,7 +643,7 @@ Deno.serve(async (req) => {
         const effort = ["low", "medium", "high", "xhigh", "max"].includes(b.effort) ? b.effort : "high";
         const row = {
           title: (b.title || "").trim() || src.slice(0, 40) + "…", author: b.author || null, notes_for_ai: b.notes_for_ai || null,
-          source: src, model, effort, pause_after_analysis: b.pause_after_analysis !== false, web_research: b.web_research !== false,
+          source: src, model, effort, pause_after_analysis: b.pause_after_analysis !== false, web_research: b.web_research !== false, footnotes: b.footnotes !== false,
           segments: segment(src), status: b.start === false ? "new" : "running",
         };
         const { data, error } = await db.from("lt_projects").insert(row).select("id").single();
@@ -533,12 +653,13 @@ Deno.serve(async (req) => {
       }
 
       case "update": {
-        const allowed = ["title", "author", "notes_for_ai", "analysis", "approved", "model", "effort", "pause_after_analysis", "web_research"];
+        const allowed = ["title", "author", "notes_for_ai", "analysis", "approved", "model", "effort", "pause_after_analysis", "web_research", "footnotes"];
         const f: any = {};
         for (const k of allowed) if (k in (b.patch || {})) f[k] = b.patch[k];
         if (b.segment != null) {
           const { data: p } = await db.from("lt_projects").select("segments").eq("id", b.id).single();
-          const segs = p!.segments; segs[b.segment] = { ...segs[b.segment], user: b.user ?? null };
+          const segs = p!.segments;
+          segs[b.segment] = { ...segs[b.segment], user: b.user ?? null, ...(Array.isArray(b.fn) ? { fn: b.fn } : {}) };
           f.segments = segs;
         }
         await patch(b.id, f);
@@ -575,6 +696,42 @@ Deno.serve(async (req) => {
         else if (b.what === "review") { const segs = [...p.segments]; segs[b.index] = { ...segs[b.index], final: null, notes: [] }; f.segments = segs; }
         await patch(b.id, f);
         return json({ started: await startRun(b.id) });
+      }
+
+      case "revise": {
+        const { data: p } = await db.from("lt_projects").select("status,segments,revisions").eq("id", b.id).single();
+        if (!p) return json({ error: "not found" }, 404);
+        if (p.status === "running") return json({ error: "Зачекай, поки завершиться поточна робота" }, 409);
+        if (p.segments.some((s: any) => !s.final && !s.user)) return json({ error: "Доредагування доступне після завершення перекладу й редактури" }, 409);
+        const replacements = (Array.isArray(b.replacements) ? b.replacements : [])
+          .map((r: any) => ({ from: String(r.from || "").trim(), to: String(r.to || "").trim() })).filter((r: any) => r.from && r.to).slice(0, 50);
+        const instructions = String(b.instructions || "").trim().slice(0, 4000);
+        const footnotes = !!b.footnotes;
+        if (!replacements.length && !instructions && !footnotes) return json({ error: "Вкажи заміни, побажання або увімкни примітки" }, 400);
+        const n = Math.max(0, ...(p.revisions || []).map((r: any) => r.n || 0)) + 1;
+        const revisions = [...(p.revisions || []), { n, at: new Date().toISOString(), replacements, instructions, footnotes, status: "running" }];
+        await patch(b.id, { revisions, status: "running", error: null, cur: {} });
+        return json({ n, started: await startRun(b.id) });
+      }
+
+      case "undo_revision": {
+        const { data: p } = await db.from("lt_projects").select("*").eq("id", b.id).single();
+        if (!p) return json({ error: "not found" }, 404);
+        if (p.status === "running") return json({ error: "Спершу зупини роботу" }, 409);
+        const last = [...(p.revisions || [])].reverse().find((r: any) => r.status === "done" || r.status === "running");
+        if (!last) return json({ error: "Немає раундів для відкату" }, 400);
+        const segs = p.segments.map((s: any) => {
+          const h = [...(s.history || [])];
+          if (h.length && h[h.length - 1].rev === last.n) {
+            const e = h.pop();
+            return { ...s, final: e.final, user: e.user, fn: e.fn, rev: e.prevRev, changes: [], history: h };
+          }
+          return (s.rev || 0) >= last.n ? { ...s, rev: Math.max(0, last.n - 1), changes: [] } : s;
+        });
+        const revisions = p.revisions.map((r: any) => r.n === last.n ? { ...r, status: "undone" } : r);
+        const analysis = (p.analysis || "").replace(new RegExp(`\\n*---\\n*<!-- rev:${last.n} -->[\\s\\S]*?<!-- /rev:${last.n} -->`), "");
+        await patch(b.id, { segments: segs, revisions, analysis, status: "done", error: null });
+        return json({ ok: true, undone: last.n });
       }
 
       case "delete": {
