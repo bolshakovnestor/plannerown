@@ -122,6 +122,17 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const words = s => (String(s).match(/\S+/g) || []).length;
 const fmt$ = n => '$' + Number(n || 0).toFixed(2);
 
+// прибирає пробіли, невидимі символи, лапки й бектики, що часто чіпляються при копіюванні
+const cleanKey = v => String(v || '').replace(/[\s\u200B-\u200D\u2060\uFEFF`'"«»“”]/g, '').replace(/^Пароль:?/i, '');
+async function ping(k) {
+  const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json', 'x-app-key': k }, body: JSON.stringify({ action: 'ping' }) });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) throw new Error('Невірний пароль. Перевір, що скопійовано рівно 24 символи.');
+  if (!r.ok || d.error) throw new Error(d.error || ('Помилка зв\'язку з сервером (' + r.status + ')'));
+}
+// вхід за посиланням …/translator/#k=ПАРОЛЬ
+(() => { const m = location.hash.match(/[#&]k=([^&]+)/); if (m) { const k = cleanKey(decodeURIComponent(m[1])); lsSet('lt_key', k); S.key = k; history.replaceState(null, '', location.pathname); } })();
+
 async function api(action, body = {}) {
   const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json', 'x-app-key': S.key }, body: JSON.stringify({ action, ...body }) });
   const d = await r.json().catch(() => ({ error: 'Сервер повернув не JSON (' + r.status + ')' }));
@@ -176,11 +187,20 @@ function render() {
   const root = $('#root');
   if (!S.key) {
     root.innerHTML = `<div class="login card"><h1>Художній перекладач</h1><p class="sub">EN → UK · аналіз стилю автора → переклад → редактура</p>
-      <label>Пароль доступу</label><input type="password" id="pw" autocomplete="current-password">
+      <label for="pw">Пароль доступу</label>
+      <div class="bar" style="flex-wrap:nowrap"><input type="text" id="pw" name="lt-access-code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore style="font-family:ui-monospace,monospace">
+      <button class="btn" id="paste" type="button">Вставити</button></div>
       <div class="bar" style="margin-top:14px"><button class="btn primary" id="go">Увійти</button></div><div id="lerr"></div></div>`;
     const go = async () => {
-      S.key = $('#pw').value.trim();
-      try { await api('ping'); lsSet('lt_key', S.key); boot(); } catch (e) { $('#lerr').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+      const raw = $('#pw').value;
+      const k = cleanKey(raw);
+      if (!k) { $('#lerr').innerHTML = `<div class="err">Введи пароль</div>`; return; }
+      try { await ping(k); S.key = k; lsSet('lt_key', k); boot(); }
+      catch (e) { $('#lerr').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+    };
+    $('#paste').onclick = async () => {
+      try { $('#pw').value = cleanKey(await navigator.clipboard.readText()); $('#pw').focus(); }
+      catch { $('#lerr').innerHTML = `<div class="err">Браузер не дав доступу до буфера. Утримуй поле пальцем → «Вставити», або набери пароль вручну.</div>`; }
     };
     $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
     return;
